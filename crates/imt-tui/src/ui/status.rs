@@ -25,12 +25,18 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Help => "Esc / ? close",
         Mode::Onboarding => "Tab next  Shift-Tab prev  Ctrl-S save  Esc cancel  Left/Right cycle TLS",
     };
-    let sync = "[idle]";
+    let (sync_text, sync_style) = if app.is_busy() {
+        (format!("[{} {}]", app.spinner_frame(), app.backend_status), theme::accent())
+    } else if app.backend_status.is_empty() {
+        ("[ready]".to_string(), theme::success())
+    } else {
+        (format!("[{}]", app.backend_status), theme::success())
+    };
     let line = Line::from(vec![
         Span::styled(format!(" {} ", mode), theme::accent()),
         Span::styled(format!(" {} ", hints), theme::muted()),
         Span::styled(format!(" {} ", app.status), theme::normal()),
-        Span::styled(format!(" {sync}"), theme::success()),
+        Span::styled(format!(" {} ", sync_text), sync_style),
     ]);
     let p = Paragraph::new(line).style(theme::status());
     f.render_widget(p, area);

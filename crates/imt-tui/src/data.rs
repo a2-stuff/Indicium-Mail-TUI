@@ -36,6 +36,9 @@ pub trait DataSource: Send + Sync {
     }
     /// Trigger a sync. `None` arguments mean "all". Default: no-op.
     fn refresh(&self, _account: Option<AccountId>, _folder: Option<FolderId>) {}
+    /// Current backend status string (e.g. "syncing", "idle", "connecting").
+    /// Default: empty.
+    fn status(&self) -> String { String::new() }
 }
 
 #[derive(Default)]

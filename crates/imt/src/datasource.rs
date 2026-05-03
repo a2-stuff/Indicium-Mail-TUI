@@ -136,6 +136,10 @@ impl DataSource for SyncDataSource {
         Ok(id)
     }
 
+    fn status(&self) -> String {
+        self.snapshot.read(|s| s.status.clone())
+    }
+
     fn refresh(&self, account: Option<AccountId>, folder: Option<FolderId>) {
         let cmd = match (account, folder) {
             (Some(a), Some(f)) => Command::SyncFolder { account: a, folder: f },

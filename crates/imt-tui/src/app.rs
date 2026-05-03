@@ -238,6 +238,36 @@ pub struct App {
     pub html_external: bool,
     /// Browser command to spawn for HTML viewing. Empty falls back to `xdg-open`.
     pub browser: String,
+    /// Tick counter, incremented every 250ms; drives the loading spinner.
+    pub ticks: u64,
+    /// Latest backend status string from `data.status()`.
+    pub backend_status: String,
+    /// Tick at which `status` was last set; status auto-clears after `STATUS_TTL_TICKS`.
+    pub status_set_tick: u64,
+}
+
+const STATUS_TTL_TICKS: u64 = 24;
+
+impl App {
+    /// Whether the backend is currently doing work (sync / connect / refresh / fetch).
+    pub fn is_busy(&self) -> bool {
+        let s = self.backend_status.to_lowercase();
+        s.contains("sync") || s.contains("connect") || s.contains("refresh") || s.contains("fetch")
+    }
+    /// Single-character spinner frame for "loading" states.
+    pub fn spinner_frame(&self) -> char {
+        const FRAMES: &[char] = &['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+        FRAMES[(self.ticks as usize) % FRAMES.len()]
+    }
+    /// Set the transient status line; the message decays automatically.
+    pub fn set_status(&mut self, s: impl Into<String>) {
+        self.status = s.into();
+        self.status_set_tick = self.ticks;
+    }
+    /// Clear the transient status line.
+    pub fn clear_status(&mut self) {
+        self.status.clear();
+    }
 }
 
 impl App {
@@ -278,6 +308,9 @@ impl App {
             onboarding: None,
             html_external: false,
             browser: String::new(),
+            ticks: 0,
+            backend_status: String::new(),
+            status_set_tick: 0,
         };
         app.refresh_messages();
         if app.accounts.is_empty() {
@@ -341,6 +374,11 @@ impl App {
     /// Periodic tick (every 250ms). Pulls fresh state from the data source so
     /// background sync events become visible without manual interaction.
     pub fn tick(&mut self) {
+        self.ticks = self.ticks.wrapping_add(1);
+        self.backend_status = self.data.status();
+        if !self.status.is_empty() && self.ticks.saturating_sub(self.status_set_tick) >= STATUS_TTL_TICKS {
+            self.status.clear();
+        }
         let new_accounts = self.data.accounts();
         let accounts_changed = new_accounts.len() != self.accounts.len()
             || new_accounts
@@ -565,7 +603,7 @@ impl App {
             KeyAction::CancelCompose => {
                 self.compose = None;
                 self.mode = Mode::Normal;
-                self.status = "Cancelled".into();
+                self.clear_status();
             }
             KeyAction::AddAttachment => {
                 self.status = "Attachments not implemented in mock".into();
@@ -575,7 +613,7 @@ impl App {
             KeyAction::CancelOnboarding => {
                 self.onboarding = None;
                 self.mode = Mode::Normal;
-                self.status = "Cancelled".into();
+                self.clear_status();
             }
             KeyAction::OnboardingCycleLeft => self.cycle_tls(-1),
             KeyAction::OnboardingCycleRight => self.cycle_tls(1),
@@ -584,7 +622,7 @@ impl App {
                 let acc = self.current_account().map(|a| a.id);
                 let folder = self.current_folder().map(|f| f.id);
                 self.data.refresh(acc, folder);
-                self.status = "refreshing...".into();
+                self.set_status("refreshing...");
             }
         }
     }

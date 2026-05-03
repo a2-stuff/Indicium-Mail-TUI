@@ -1,9 +1,9 @@
 //! Message list pane.
 
 use chrono::{DateTime, Datelike, Local, Utc};
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Cell, Row, Table};
+use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -62,6 +62,20 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .border_type(BorderType::Rounded)
         .border_style(if focused { theme::border_focused() } else { theme::border() })
         .title(Span::styled(title, theme::accent()));
+
+    if app.messages.is_empty() {
+        let text = if app.is_busy() {
+            format!("{}  Loading messages...", app.spinner_frame())
+        } else {
+            "(no messages)".to_string()
+        };
+        let style = if app.is_busy() { theme::accent() } else { theme::muted() };
+        let p = Paragraph::new(Line::from(Span::styled(text, style)))
+            .alignment(Alignment::Center)
+            .block(block);
+        f.render_widget(p, area);
+        return;
+    }
 
     let rows: Vec<Row> = app
         .messages
