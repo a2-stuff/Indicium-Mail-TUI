@@ -168,6 +168,16 @@ pub trait MailBackend: Send {
         flags: &[Flag],
     ) -> Result<u32>;
 
+    /// Move a message identified by `uid` from `folder` to `dest_folder`.
+    /// Uses IMAP MOVE when advertised; otherwise falls back to UID COPY +
+    /// STORE +FLAGS \Deleted + EXPUNGE.
+    async fn move_uid(
+        &mut self,
+        folder: &str,
+        uid: u32,
+        dest_folder: &str,
+    ) -> Result<()>;
+
     /// Begin an IDLE session against `folder`. Falls back to polling if the
     /// server does not advertise IDLE.
     async fn idle(&mut self, folder: &str) -> Result<IdleHandle>;

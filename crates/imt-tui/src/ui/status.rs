@@ -19,15 +19,17 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Onboarding => "ONBOARDING",
         Mode::Settings => "SETTINGS",
         Mode::Accounts => "ACCOUNTS",
+        Mode::Move => "MOVE",
     };
     let hints = match app.mode {
-        Mode::Normal => "j/k move  Enter open  c compose  M accounts  , settings  F5 refresh  / search  ? help  q quit",
+        Mode::Normal => "j/k move  Enter open  c compose  r reply  R reply-all  f forward  u read/unread  v move  d delete  Ctrl-R refresh  M accounts  , settings  / search  ? help  q quit",
         Mode::Compose => "Tab next  Ctrl-S send  Ctrl-D save  Esc cancel",
         Mode::Search => "type to search  Enter jump  Esc cancel",
         Mode::Help => "Esc / ? close",
         Mode::Onboarding => "Tab next  Shift-Tab prev  Ctrl-S save  Esc cancel  Left/Right cycle TLS",
         Mode::Settings => "Tab next  Space toggle  Ctrl-S save  Esc cancel",
         Mode::Accounts => "j/k move  Enter edit  d delete  a add  Esc close",
+        Mode::Move => "j/k move  Enter select  Esc cancel",
     };
     let (sync_text, sync_style) = if app.is_busy() {
         (format!("[{} {}]", app.spinner_frame(), app.backend_status), theme::accent())

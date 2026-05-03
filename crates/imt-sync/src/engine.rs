@@ -284,6 +284,29 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// Move a message to another folder. Persists the move locally as well.
+    pub async fn move_message(&self, message_id: MessageId, dest_folder_id: FolderId) -> Result<()> {
+        let msg_repo = MessageRepo::new(self.db.pool());
+        let folder_repo = FolderRepo::new(self.db.pool());
+        let msg = msg_repo.get(message_id).await?;
+        let src_folder = folder_repo.get(msg.folder_id).await?;
+        let dst_folder = folder_repo.get(dest_folder_id).await?;
+        let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
+
+        let provider = imap_provider_for(acc.id);
+        let mut backend = ImapBackend::new(acc, provider);
+        backend.connect().await?;
+        backend.move_uid(&src_folder.path, msg.uid.0, &dst_folder.path).await?;
+        let _ = backend.disconnect().await;
+
+        msg_repo.delete_by_uid(src_folder.id, msg.uid).await?;
+        let _ = self.tx.send(SyncEvent::MessageRemoved {
+            folder_id: src_folder.id,
+            uid: msg.uid,
+        });
+        Ok(())
+    }
+
     /// Cancel every running worker and wait for them to exit.
     pub async fn shutdown(&self) -> Result<()> {
         let mut tasks = self.tasks.lock().await;

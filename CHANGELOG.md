@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.9] - 2026-05-03
+
+### Added
+- **Auto mark-read after 3 seconds dwell**: opening a message with `Enter` no longer marks it read. Read state is set after the message is in focus in the reader pane for 3 seconds. Disabled when the `mark_read_on_open` setting is off.
+- **Mark unread / mark read** key (`u` in normal mode) toggles the `\Seen` flag on the current message.
+- **Move to folder** key (`v` in normal mode) opens a folder picker modal; `j/k` to choose, `Enter` to confirm.
+- **Delete** (`d`) now actually moves the current message to the account's Trash folder. If no Trash folder exists, the local copy is removed.
+- **Reply** (`r`) and **reply-all** (`R`) and **forward** (`f`) keys are documented in the status hint line (already worked).
+- **Ctrl-L** added as a refresh keybinding alongside `F5` and `Ctrl-R` (handy on macOS keyboards where `F5` requires `fn`).
+- New IMAP method `move_uid` using `UID MOVE` when the server advertises the `MOVE` capability, falling back to `UID COPY` + `STORE +FLAGS \Deleted` + `EXPUNGE`.
+- New `SyncEngine::move_message` and `Command::Move` / `Command::Delete` plumbed through the snapshot adapter.
+
 ## [0.0.8] - 2026-05-03
 
 ### Added

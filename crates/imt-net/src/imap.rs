@@ -100,6 +100,7 @@ pub struct ImapBackend {
     password_provider: PasswordProvider,
     session: Arc<Mutex<SessionSlot>>,
     has_idle: Arc<Mutex<Option<bool>>>,
+    has_move: Arc<Mutex<Option<bool>>>,
 }
 
 /// Holds either an owned session, an active IDLE handle, or nothing.
@@ -164,6 +165,7 @@ impl ImapBackend {
             password_provider,
             session: Arc::new(Mutex::new(SessionSlot::Empty)),
             has_idle: Arc::new(Mutex::new(None)),
+            has_move: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -457,14 +459,15 @@ impl MailBackend for ImapBackend {
         let mut session = self.open_session().await?;
         // Probe IDLE capability once at connect time so later `idle()` calls can
         // pick the push or polling implementation without an extra round-trip.
-        let has_idle = match session.capabilities().await {
-            Ok(caps) => caps.has_str("IDLE"),
+        let (has_idle, has_move) = match session.capabilities().await {
+            Ok(caps) => (caps.has_str("IDLE"), caps.has_str("MOVE")),
             Err(e) => {
-                tracing::debug!(error = %e, "CAPABILITY probe failed; assuming no IDLE");
-                false
+                tracing::debug!(error = %e, "CAPABILITY probe failed; assuming no IDLE/MOVE");
+                (false, false)
             }
         };
         *self.has_idle.lock().await = Some(has_idle);
+        *self.has_move.lock().await = Some(has_move);
         *self.session.lock().await = SessionSlot::Owned(Box::new(session));
         Ok(())
     }
@@ -662,6 +665,46 @@ impl MailBackend for ImapBackend {
         // and let the caller treat that as "unknown" and resync via UIDNEXT.
         tracing::debug!(folder, "APPEND ok; APPENDUID not extracted in this build");
         Ok(0)
+    }
+
+    async fn move_uid(
+        &mut self,
+        folder: &str,
+        uid: u32,
+        dest_folder: &str,
+    ) -> Result<()> {
+        let supports_move = self.has_move.lock().await.unwrap_or(false);
+        let mut guard = self.session.lock().await;
+        let session = guard.as_mut_owned()?;
+        session
+            .select(folder)
+            .await
+            .map_err(|e| NetError::Protocol(format!("select {}: {}", folder, e)))?;
+
+        if supports_move {
+            session
+                .uid_mv(uid.to_string(), dest_folder)
+                .await
+                .map_err(|e| NetError::Protocol(format!("uid move: {}", e)))?;
+        } else {
+            session
+                .uid_copy(uid.to_string(), dest_folder)
+                .await
+                .map_err(|e| NetError::Protocol(format!("uid copy: {}", e)))?;
+            let stream = session
+                .uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)")
+                .await
+                .map_err(|e| NetError::Protocol(format!("store deleted: {}", e)))?;
+            let _: Vec<_> = stream
+                .try_collect()
+                .await
+                .map_err(|e| NetError::Protocol(format!("store drain: {}", e)))?;
+            let _stream = session
+                .expunge()
+                .await
+                .map_err(|e| NetError::Protocol(format!("expunge: {}", e)))?;
+        }
+        Ok(())
     }
 
     async fn idle(&mut self, folder: &str) -> Result<IdleHandle> {

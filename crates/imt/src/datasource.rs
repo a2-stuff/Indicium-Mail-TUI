@@ -40,6 +40,8 @@ pub enum Command {
     SyncFolder { account: AccountId, folder: FolderId },
     SyncAccount { account: AccountId },
     SyncAll,
+    Move { message_id: MessageId, dest_folder: FolderId },
+    Delete { message_id: MessageId },
 }
 
 /// Sync-trait adapter the TUI talks to. All write methods enqueue a `Command`.
@@ -110,6 +112,22 @@ impl DataSource for SyncDataSource {
         let _ = self.commands.send(Command::SetFlag { message_id: message, flag: Flag::Seen, add: true });
     }
 
+    fn set_seen(&self, message: MessageId, seen: bool) {
+        self.snapshot.write(|s| {
+            for msgs in s.messages_by_folder.values_mut() {
+                if let Some(m) = msgs.iter_mut().find(|m| m.id == message) {
+                    let has = m.flags.contains(&Flag::Seen);
+                    if seen && !has {
+                        m.flags.push(Flag::Seen);
+                    } else if !seen && has {
+                        m.flags.retain(|f| f != &Flag::Seen);
+                    }
+                }
+            }
+        });
+        let _ = self.commands.send(Command::SetFlag { message_id: message, flag: Flag::Seen, add: seen });
+    }
+
     fn toggle_flag(&self, message: MessageId) {
         self.snapshot.toggle_local_flag(message, Flag::Flagged);
         let was_flagged = self.snapshot.read(|s| {
@@ -117,6 +135,51 @@ impl DataSource for SyncDataSource {
                 .map(|m| m.flags.contains(&Flag::Flagged)).unwrap_or(false)
         });
         let _ = self.commands.send(Command::SetFlag { message_id: message, flag: Flag::Flagged, add: was_flagged });
+    }
+
+    fn move_message(&self, message: MessageId, dest_folder: FolderId) -> anyhow::Result<()> {
+        let src_folder = self.snapshot.read(|s| {
+            s.messages_by_folder.iter()
+                .find(|(_, msgs)| msgs.iter().any(|m| m.id == message))
+                .map(|(fid, _)| *fid)
+        });
+        if let Some(src) = src_folder {
+            self.snapshot.write(|s| {
+                if let Some(msgs) = s.messages_by_folder.get_mut(&src) {
+                    if let Some(pos) = msgs.iter().position(|m| m.id == message) {
+                        let mut m = msgs.remove(pos);
+                        m.folder_id = dest_folder;
+                        s.messages_by_folder.entry(dest_folder).or_default().push(m);
+                    }
+                }
+            });
+        }
+        self.commands
+            .send(Command::Move { message_id: message, dest_folder })
+            .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
+        Ok(())
+    }
+
+    fn delete_message(&self, message: MessageId) -> anyhow::Result<()> {
+        let trash_id = self.snapshot.read(|s| {
+            s.messages_by_folder.iter()
+                .find(|(_, msgs)| msgs.iter().any(|m| m.id == message))
+                .and_then(|(fid, msgs)| msgs.iter().find(|m| m.id == message).map(|m| m.account_id))
+                .and_then(|aid| s.folders_by_account.get(&aid))
+                .and_then(|fs| fs.iter().find(|f| f.role == imt_core::FolderRole::Trash).map(|f| f.id))
+        });
+        if let Some(dest) = trash_id {
+            return self.move_message(message, dest);
+        }
+        self.snapshot.write(|s| {
+            for msgs in s.messages_by_folder.values_mut() {
+                msgs.retain(|m| m.id != message);
+            }
+        });
+        self.commands
+            .send(Command::Delete { message_id: message })
+            .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
+        Ok(())
     }
 
     fn search(&self, query: &str) -> Vec<MessageId> {
@@ -266,6 +329,15 @@ pub async fn command_worker(
                         snapshot.set_status(format!("sync failed: {}", e));
                     }
                 }
+            }
+            Command::Move { message_id, dest_folder } => {
+                if let Err(e) = engine.move_message(message_id, dest_folder).await {
+                    snapshot.set_status(format!("move failed: {}", e));
+                }
+            }
+            Command::Delete { message_id } => {
+                let _ = message_id;
+                snapshot.set_status("delete: no Trash folder, message kept");
             }
             Command::SyncAll => {
                 let pairs = snapshot.read(|s| {

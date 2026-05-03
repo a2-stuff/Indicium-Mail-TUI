@@ -250,6 +250,13 @@ pub struct App {
     pub settings_state: Option<SettingsState>,
     /// Account manager state, when open.
     pub accounts_state: Option<AccountsState>,
+    /// Move-to-folder modal state, when open.
+    pub move_state: Option<MoveState>,
+    /// Tick at which the currently selected message was first viewed by the
+    /// reader. Used to mark-as-read after `READ_DELAY_TICKS` ticks.
+    pub message_view_started_tick: Option<u64>,
+    /// Last message id whose view timer is being tracked.
+    pub message_view_id: Option<imt_core::MessageId>,
     /// When set, the next onboarding save is interpreted as edit-of-existing
     /// rather than add-new.
     pub onboarding_edit_id: Option<imt_core::AccountId>,
@@ -295,6 +302,14 @@ impl Default for AccountsState {
 }
 
 const STATUS_TTL_TICKS: u64 = 24;
+const READ_DELAY_TICKS: u64 = 12; // 3 seconds at 250ms tick
+
+/// Move-to-folder modal state.
+pub struct MoveState {
+    pub message_id: imt_core::MessageId,
+    pub folders: Vec<imt_core::Folder>,
+    pub selected: usize,
+}
 
 impl App {
     /// Whether the backend is currently doing work (sync / connect / refresh / fetch).
@@ -362,6 +377,9 @@ impl App {
             settings: crate::settings::Settings::default(),
             settings_state: None,
             accounts_state: None,
+            move_state: None,
+            message_view_started_tick: None,
+            message_view_id: None,
             onboarding_edit_id: None,
             last_auto_refresh_tick: 0,
             on_settings_changed: None,
@@ -423,6 +441,35 @@ impl App {
         self.messages.get(self.message_idx)
     }
 
+    fn maybe_mark_read_after_dwell(&mut self) {
+        if !self.settings.mark_read_on_open {
+            return;
+        }
+        if self.focus != Focus::Reader {
+            self.message_view_started_tick = None;
+            self.message_view_id = None;
+            return;
+        }
+        let current_id = self.current_message().map(|m| m.id);
+        let unread = self.current_message().map(|m| m.is_unread()).unwrap_or(false);
+        if !unread || current_id.is_none() {
+            self.message_view_started_tick = None;
+            self.message_view_id = None;
+            return;
+        }
+        if self.message_view_id != current_id {
+            self.message_view_id = current_id;
+            self.message_view_started_tick = Some(self.ticks);
+            return;
+        }
+        if let (Some(start), Some(id)) = (self.message_view_started_tick, current_id) {
+            if self.ticks.saturating_sub(start) >= READ_DELAY_TICKS {
+                self.data.mark_read(id);
+                self.message_view_started_tick = None;
+            }
+        }
+    }
+
     /// Refresh the message list from the selected folder.
     pub fn refresh_messages(&mut self) {
         if let Some(f) = self.current_folder() {
@@ -452,6 +499,7 @@ impl App {
         if !self.status.is_empty() && self.ticks.saturating_sub(self.status_set_tick) >= STATUS_TTL_TICKS {
             self.status.clear();
         }
+        self.maybe_mark_read_after_dwell();
         if self.settings.auto_refresh_secs > 0 {
             let interval_ticks = (self.settings.auto_refresh_secs as u64) * 4;
             if self.ticks.saturating_sub(self.last_auto_refresh_tick) >= interval_ticks {
@@ -577,7 +625,7 @@ impl App {
             }
             return;
         }
-        if self.mode == Mode::Accounts {
+        if self.mode == Mode::Accounts || self.mode == Mode::Move {
             if let Some(action) = map_key(self.focus, self.mode, key) {
                 self.dispatch(action);
             }
@@ -747,6 +795,13 @@ impl App {
                 self.accounts_state = None;
                 self.open_onboarding();
             }
+            KeyAction::ToggleRead => self.toggle_read_current(),
+            KeyAction::OpenMoveModal => self.open_move_modal(),
+            KeyAction::MoveCancel => {
+                self.move_state = None;
+                self.mode = Mode::Normal;
+            }
+            KeyAction::MoveSelect => self.move_select(),
         }
     }
 
@@ -978,6 +1033,12 @@ impl App {
     }
 
     fn move_up(&mut self) {
+        if self.mode == Mode::Move {
+            if let Some(s) = self.move_state.as_mut() {
+                if s.selected > 0 { s.selected -= 1; }
+            }
+            return;
+        }
         if self.mode == Mode::Accounts {
             if let Some(s) = self.accounts_state.as_mut() {
                 if s.selected > 0 { s.selected -= 1; }
@@ -1000,6 +1061,12 @@ impl App {
     }
 
     fn move_down(&mut self) {
+        if self.mode == Mode::Move {
+            if let Some(s) = self.move_state.as_mut() {
+                if s.selected + 1 < s.folders.len() { s.selected += 1; }
+            }
+            return;
+        }
         if self.mode == Mode::Accounts {
             if let Some(s) = self.accounts_state.as_mut() {
                 if s.selected + 1 < self.accounts.len() { s.selected += 1; }
@@ -1094,13 +1161,9 @@ impl App {
             self.mode = Mode::Normal;
             return;
         }
-        if let Some(m) = self.current_message() {
-            let id = m.id;
-            if self.settings.mark_read_on_open {
-                self.data.mark_read(id);
-            }
-            self.refresh_messages();
+        if self.current_message().is_some() {
             self.focus = Focus::Reader;
+            self.refresh_body();
         }
     }
 
@@ -1112,7 +1175,71 @@ impl App {
     }
 
     fn delete_current(&mut self) {
-        self.status = "Delete not implemented in mock".into();
+        let id = match self.current_message() {
+            Some(m) => m.id,
+            None => return,
+        };
+        match self.data.delete_message(id) {
+            Ok(()) => {
+                self.set_status("Moved to Trash");
+                self.refresh_messages();
+            }
+            Err(e) => self.set_status(format!("Delete failed: {e}")),
+        }
+    }
+
+    fn toggle_read_current(&mut self) {
+        let m = match self.current_message() {
+            Some(m) => m,
+            None => return,
+        };
+        let id = m.id;
+        let now_seen = !m.is_unread();
+        self.data.set_seen(id, !now_seen);
+        self.refresh_messages();
+        self.set_status(if now_seen { "Marked unread" } else { "Marked read" });
+    }
+
+    fn open_move_modal(&mut self) {
+        let id = match self.current_message() {
+            Some(m) => m.id,
+            None => return,
+        };
+        let acc = match self.current_account() {
+            Some(a) => a.id,
+            None => return,
+        };
+        let current_folder = self.current_folder().map(|f| f.id);
+        let folders: Vec<_> = self
+            .data
+            .folders(acc)
+            .into_iter()
+            .filter(|f| Some(f.id) != current_folder)
+            .collect();
+        if folders.is_empty() {
+            self.set_status("No other folders");
+            return;
+        }
+        self.move_state = Some(MoveState { message_id: id, folders, selected: 0 });
+        self.mode = Mode::Move;
+    }
+
+    fn move_select(&mut self) {
+        let dest = match self.move_state.as_ref() {
+            Some(s) => s.folders.get(s.selected).map(|f| (s.message_id, f.id)),
+            None => None,
+        };
+        if let Some((mid, fid)) = dest {
+            match self.data.move_message(mid, fid) {
+                Ok(()) => {
+                    self.set_status("Moved");
+                    self.refresh_messages();
+                }
+                Err(e) => self.set_status(format!("Move failed: {e}")),
+            }
+        }
+        self.move_state = None;
+        self.mode = Mode::Normal;
     }
 
     fn toggle_flag(&mut self) {

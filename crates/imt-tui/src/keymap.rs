@@ -20,6 +20,7 @@ pub enum Mode {
     Onboarding,
     Settings,
     Accounts,
+    Move,
 }
 
 /// Field focus inside the onboarding modal.
@@ -155,6 +156,10 @@ pub enum KeyAction {
     AccountsEdit,
     AccountsDelete,
     AccountsAdd,
+    ToggleRead,
+    OpenMoveModal,
+    MoveCancel,
+    MoveSelect,
 }
 
 /// Translate a key event to a `KeyAction` in normal mode (compose mode handled separately).
@@ -167,6 +172,17 @@ pub fn map_key(focus: Focus, mode: Mode, key: KeyEvent) -> Option<KeyAction> {
         Mode::Onboarding => map_onboarding(key),
         Mode::Settings => map_settings(key),
         Mode::Accounts => map_accounts(key),
+        Mode::Move => map_move(key),
+    }
+}
+
+fn map_move(key: KeyEvent) -> Option<KeyAction> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(KeyAction::MoveCancel),
+        KeyCode::Up | KeyCode::Char('k') => Some(KeyAction::Up),
+        KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Down),
+        KeyCode::Enter => Some(KeyAction::MoveSelect),
+        _ => None,
     }
 }
 
@@ -226,6 +242,9 @@ fn map_normal(focus: Focus, key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('o') => Some(KeyAction::OpenHtmlInBrowser),
         KeyCode::F(5) => Some(KeyAction::Refresh),
         KeyCode::Char('r') if ctrl => Some(KeyAction::Refresh),
+        KeyCode::Char('l') if ctrl => Some(KeyAction::Refresh),
+        KeyCode::Char('u') => Some(KeyAction::ToggleRead),
+        KeyCode::Char('v') => Some(KeyAction::OpenMoveModal),
         KeyCode::Char(',') => Some(KeyAction::OpenSettings),
         KeyCode::Char('M') => Some(KeyAction::OpenAccounts),
         _ => None,

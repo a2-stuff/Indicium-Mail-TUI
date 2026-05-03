@@ -43,6 +43,16 @@ pub trait DataSource: Send + Sync {
     fn delete_account(&self, _id: AccountId) -> anyhow::Result<()> {
         anyhow::bail!("delete_account not supported by this data source")
     }
+    /// Set or unset the `\Seen` flag on a message.
+    fn set_seen(&self, _message: MessageId, _seen: bool) {}
+    /// Move a message to another folder. Default: no-op.
+    fn move_message(&self, _message: MessageId, _dest_folder: FolderId) -> anyhow::Result<()> {
+        Ok(())
+    }
+    /// Delete a message (typically by moving to Trash). Default: no-op.
+    fn delete_message(&self, _message: MessageId) -> anyhow::Result<()> {
+        Ok(())
+    }
     /// Trigger a sync. `None` arguments mean "all". Default: no-op.
     fn refresh(&self, _account: Option<AccountId>, _folder: Option<FolderId>) {}
     /// Current backend status string (e.g. "syncing", "idle", "connecting").
@@ -164,13 +174,57 @@ impl DataSource for InMemoryDataSource {
     }
 
     fn mark_read(&self, message: MessageId) {
+        self.set_seen(message, true);
+    }
+
+    fn set_seen(&self, message: MessageId, seen: bool) {
         let mut store = self.inner.lock().unwrap();
         for msgs in store.messages.values_mut() {
             for m in msgs.iter_mut() {
-                if m.id == message && !m.flags.contains(&Flag::Seen) {
-                    m.flags.push(Flag::Seen);
+                if m.id == message {
+                    let has = m.flags.contains(&Flag::Seen);
+                    if seen && !has {
+                        m.flags.push(Flag::Seen);
+                    } else if !seen && has {
+                        m.flags.retain(|f| f != &Flag::Seen);
+                    }
                 }
             }
+        }
+    }
+
+    fn move_message(&self, message: MessageId, dest_folder: FolderId) -> anyhow::Result<()> {
+        let mut store = self.inner.lock().unwrap();
+        let mut moving: Option<imt_core::Message> = None;
+        for msgs in store.messages.values_mut() {
+            if let Some(pos) = msgs.iter().position(|m| m.id == message) {
+                let mut m = msgs.remove(pos);
+                m.folder_id = dest_folder;
+                moving = Some(m);
+                break;
+            }
+        }
+        if let Some(m) = moving {
+            store.messages.entry(dest_folder).or_default().push(m);
+        }
+        Ok(())
+    }
+
+    fn delete_message(&self, message: MessageId) -> anyhow::Result<()> {
+        let trash_id: Option<FolderId> = {
+            let store = self.inner.lock().unwrap();
+            let acc = store.accounts.first().map(|a| a.id);
+            acc.and_then(|aid| store.folders.get(&aid)
+                .and_then(|fs| fs.iter().find(|f| f.role == FolderRole::Trash).map(|f| f.id)))
+        };
+        if let Some(dest) = trash_id {
+            self.move_message(message, dest)
+        } else {
+            let mut store = self.inner.lock().unwrap();
+            for msgs in store.messages.values_mut() {
+                msgs.retain(|m| m.id != message);
+            }
+            Ok(())
         }
     }
 
