@@ -3,6 +3,13 @@
 A fast, modern terminal email client written in Rust.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.80+-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Ratatui](https://img.shields.io/badge/Ratatui-0.28-blueviolet?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0yMSAzSDNjLTEuMSAwLTIgLjktMiAydjE0YzAgMS4xLjkgMiAyIDJoMThjMS4xIDAgMi0uOSAyLTJWNWMwLTEuMS0uOS0yLTItMnptMCAxNkgzVjVoMTh2MTR6Ii8+PC9zdmc+)](https://ratatui.rs)
+[![Tokio](https://img.shields.io/badge/Tokio-1.40-brightgreen?logo=rust&logoColor=white)](https://tokio.rs)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL%20%2B%20FTS5-blue?logo=sqlite&logoColor=white)](https://www.sqlite.org)
+[![IMAP](https://img.shields.io/badge/IMAP-RFC%202177%20IDLE-informational?logo=mail.ru&logoColor=white)]()
+[![SMTP](https://img.shields.io/badge/SMTP-TLS%20%2F%20STARTTLS-informational?logo=mail.ru&logoColor=white)]()
+[![OAuth2](https://img.shields.io/badge/OAuth2-PKCE-success?logo=openid&logoColor=white)]()
 
 ## Features
 
