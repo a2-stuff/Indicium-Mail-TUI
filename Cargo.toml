@@ -10,11 +10,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.15"
+version = "0.0.16"
 edition = "2021"
 license = "MIT"
-authors = ["Indicium Mail TUI contributors"]
-repository = "https://github.com/indicium/indicium-mail-tui"
+authors = ["https://x.com/not_jarod"]
+repository = "https://github.com/a2-stuff/Indicium-Mail-TUI"
 rust-version = "1.80"
 
 [workspace.dependencies]

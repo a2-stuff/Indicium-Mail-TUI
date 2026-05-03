@@ -88,7 +88,7 @@ fn render_body_text(app: &App, width: usize) -> String {
         return plain.clone();
     }
     if let Some(html) = &body.text_html {
-        if app.html_external && body.text_plain.is_none() {
+        if app.html_external {
             return String::from("[HTML body - press 'o' to open in browser]");
         }
         let w = width.max(20);
