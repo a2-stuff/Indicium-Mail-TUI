@@ -1,0 +1,31 @@
+[package]
+name = "imt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Indicium Mail TUI - a fast, modern terminal email client"
+
+[[bin]]
+name = "imt"
+path = "src/main.rs"
+
+[dependencies]
+imt-core = { path = "../imt-core" }
+imt-store = { path = "../imt-store" }
+imt-net = { path = "../imt-net" }
+imt-sync = { path = "../imt-sync" }
+imt-tui = { path = "../imt-tui" }
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+serde.workspace = true
+toml.workspace = true
+directories.workspace = true
+clap = { version = "4", features = ["derive"] }
+rpassword = "7"
+chrono.workspace = true
+uuid.workspace = true

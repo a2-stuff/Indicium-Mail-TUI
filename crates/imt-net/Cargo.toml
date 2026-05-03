@@ -1,0 +1,30 @@
+[package]
+name = "imt-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+imt-core = { path = "../imt-core" }
+tokio.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-imap.workspace = true
+async-native-tls = { version = "0.5", default-features = false, features = ["runtime-tokio"] }
+mail-parser.workspace = true
+mail-builder.workspace = true
+lettre.workspace = true
+futures.workspace = true
+chrono.workspace = true
+bytes.workspace = true
+serde.workspace = true
+url = { workspace = true }
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+rand = "0.8"
+sha2 = "0.10"
+serde_json = "1"

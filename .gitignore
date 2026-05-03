@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+.env
+.env.local
+*.log
+.DS_Store
+
+# Per-agent target dirs used during parallel scaffold
+/target-*

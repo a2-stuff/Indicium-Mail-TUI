@@ -1,0 +1,24 @@
+[package]
+name = "imt-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+imt-core = { path = "../imt-core" }
+ratatui.workspace = true
+crossterm.workspace = true
+tui-textarea.workspace = true
+tui-input.workspace = true
+tokio.workspace = true
+futures.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+html2text.workspace = true
+serde.workspace = true
+unicode-width = "0.2"
+uuid.workspace = true

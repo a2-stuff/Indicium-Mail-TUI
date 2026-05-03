@@ -1,0 +1,21 @@
+[package]
+name = "imt-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+imt-core = { path = "../imt-core" }
+imt-store = { path = "../imt-store" }
+imt-net = { path = "../imt-net" }
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+serde.workspace = true
+uuid.workspace = true
