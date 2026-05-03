@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Datelike, Local, Utc};
 use ratatui::layout::{Alignment, Constraint, Rect};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
@@ -77,6 +77,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    let show_snippet = app.settings.show_snippet;
     let rows: Vec<Row> = app
         .messages
         .iter()
@@ -113,12 +114,24 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                 theme::muted()
             };
 
+            let subject_cell = if show_snippet && !m.snippet.is_empty() {
+                Cell::from(Text::from(vec![
+                    Line::from(Span::styled(subject, row_style)),
+                    Line::from(Span::styled(m.snippet.clone(), theme::muted())),
+                ]))
+            } else {
+                Cell::from(Line::from(vec![Span::styled(subject, row_style)]))
+            };
+
+            let height = if show_snippet && !m.snippet.is_empty() { 2 } else { 1 };
+
             let mut row = Row::new(vec![
                 Cell::from(Span::styled(indicator.to_string(), ind_style)),
                 Cell::from(Span::styled(from, row_style)),
-                Cell::from(Line::from(vec![Span::styled(subject, row_style)])),
+                subject_cell,
                 Cell::from(Span::styled(date, theme::muted())),
-            ]);
+            ])
+            .height(height);
             if i == app.message_idx {
                 row = row.style(theme::selected());
             }

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.13] - 2026-05-03
+
+### Fixed
+- **Sidebar unread count went stale when all messages were read**: the old condition `live_unread > 0 || folder.message_count == 0` fell back to the stale server-reported count instead of showing 0. Now checks whether messages have been loaded at all (`!loaded.is_empty()`) and only falls back when the snapshot has no data yet.
+- **Read/unread flag not syncing to server**: `Command::SetFlag` was handled inline in the command worker, opening a fresh IMAP connection but never emitting a `MessageFlagsChanged` event, so the DB and snapshot could diverge from the server. Moved to `SyncEngine::set_flag()` which: opens IMAP, stores the flag via `UID STORE`, updates the local DB, then emits `MessageFlagsChanged` - the snapshot reflects the confirmed server state.
+- Removed dead `secrets::load` call in the old SetFlag handler (loaded the password but immediately discarded it).
+
+### Added
+- **Show preview snippet** setting now works: when enabled in Settings (`Space` on the "Show preview snippet" row), each message row expands to two lines - the subject on top, the snippet dimmed below.
+
 ## [0.0.12] - 2026-05-03
 
 ### Added

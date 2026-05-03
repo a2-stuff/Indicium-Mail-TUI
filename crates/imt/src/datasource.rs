@@ -20,7 +20,7 @@ fn folder_sort_key(role: FolderRole) -> u8 {
         FolderRole::Drafts => 6,
     }
 }
-use imt_store::{secrets, Db, DraftRepo};
+use imt_store::{Db, DraftRepo};
 use imt_sync::SyncEngine;
 use imt_tui::DataSource;
 use tokio::sync::mpsc;
@@ -352,36 +352,8 @@ pub async fn command_worker(
                 }
             }
             Command::SetFlag { message_id, flag, add } => {
-                let acc = snapshot.read(|s| {
-                    s.messages_by_folder.values().flatten()
-                        .find(|m| m.id == message_id)
-                        .map(|m| (m.account_id, m.folder_id, m.uid))
-                });
-                if let Some((_acc_id, folder_id, uid)) = acc {
-                    let folder = snapshot.read(|s| {
-                        s.folders_by_account.values().flatten()
-                            .find(|f| f.id == folder_id).cloned()
-                    });
-                    if let Some(folder) = folder {
-                        let acc = snapshot.read(|s| {
-                            s.accounts.iter().find(|a| a.id == folder.account_id).cloned()
-                        });
-                        if let Some(acc) = acc {
-                            let provider = imt_sync::password::imap_provider_for(acc.id);
-                            let _ = secrets::load(acc.id, "imap_password");
-                            let mut backend = imt_net::ImapBackend::new(acc, provider);
-                            use imt_net::backend::MailBackend;
-                            if backend.connect().await.is_ok() {
-                                let (add_v, rem_v): (Vec<Flag>, Vec<Flag>) = if add {
-                                    (vec![flag.clone()], Vec::new())
-                                } else {
-                                    (Vec::new(), vec![flag.clone()])
-                                };
-                                let _ = backend.set_flags(&folder.path, uid.0, &add_v, &rem_v).await;
-                                let _ = backend.disconnect().await;
-                            }
-                        }
-                    }
+                if let Err(e) = engine.set_flag(message_id, flag, add).await {
+                    snapshot.set_status(format!("set flag failed: {}", e));
                 }
             }
         }

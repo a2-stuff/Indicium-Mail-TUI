@@ -33,14 +33,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         if av.expanded {
             for (fi, folder) in av.folders.iter().enumerate() {
                 let selected = is_acc_sel && fi == app.sidebar_folder_idx;
-                let live_unread = app
-                    .data
-                    .messages(folder.id)
-                    .iter()
-                    .filter(|m| m.is_unread())
-                    .count() as u32;
-                let unread = if live_unread > 0 || folder.message_count == 0 {
-                    live_unread
+                let loaded = app.data.messages(folder.id);
+                // Use live count when messages have been loaded into the snapshot.
+                // Only fall back to the server-reported count when the snapshot
+                // has no data for this folder yet (first startup before sync).
+                let unread = if !loaded.is_empty() || folder.message_count == 0 {
+                    loaded.iter().filter(|m| m.is_unread()).count() as u32
                 } else {
                     folder.unread_count
                 };

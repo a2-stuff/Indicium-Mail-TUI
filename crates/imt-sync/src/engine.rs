@@ -307,6 +307,45 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// Set or clear a flag on a message. Contacts the IMAP server, updates the
+    /// DB, and emits `MessageFlagsChanged` so the snapshot reflects the change.
+    pub async fn set_flag(&self, message_id: MessageId, flag: Flag, add: bool) -> Result<()> {
+        let msg_repo = MessageRepo::new(self.db.pool());
+        let msg = msg_repo.get(message_id).await?;
+        let folder = FolderRepo::new(self.db.pool()).get(msg.folder_id).await?;
+        let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
+
+        let provider = imap_provider_for(acc.id);
+        let mut backend = ImapBackend::new(acc, provider);
+        backend.connect().await?;
+
+        let (add_v, rem_v): (Vec<Flag>, Vec<Flag>) = if add {
+            (vec![flag.clone()], Vec::new())
+        } else {
+            (Vec::new(), vec![flag.clone()])
+        };
+        backend.set_flags(&folder.path, msg.uid.0, &add_v, &rem_v).await?;
+        let _ = backend.disconnect().await;
+
+        let mut updated_flags = msg.flags.clone();
+        if add {
+            if !updated_flags.contains(&flag) {
+                updated_flags.push(flag);
+            }
+        } else {
+            updated_flags.retain(|f| f != &flag);
+        }
+        let mut updated_msg = msg;
+        updated_msg.flags = updated_flags.clone();
+        msg_repo.upsert_envelope(&updated_msg).await?;
+
+        let _ = self.tx.send(SyncEvent::MessageFlagsChanged {
+            message_id,
+            flags: updated_flags,
+        });
+        Ok(())
+    }
+
     /// Cancel every running worker and wait for them to exit.
     pub async fn shutdown(&self) -> Result<()> {
         let mut tasks = self.tasks.lock().await;
