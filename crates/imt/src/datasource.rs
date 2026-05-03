@@ -5,9 +5,21 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use imt_core::{
-    Account, AccountId, Draft, Flag, Folder, FolderId, Message, MessageBody, MessageId,
+    Account, AccountId, Draft, Flag, Folder, FolderId, FolderRole, Message, MessageBody, MessageId,
     NewAccountForm,
 };
+
+fn folder_sort_key(role: FolderRole) -> u8 {
+    match role {
+        FolderRole::Inbox => 0,
+        FolderRole::Other => 1,
+        FolderRole::Archive => 2,
+        FolderRole::Sent => 3,
+        FolderRole::Junk => 4,
+        FolderRole::Trash => 5,
+        FolderRole::Drafts => 6,
+    }
+}
 use imt_store::{secrets, Db, DraftRepo};
 use imt_sync::SyncEngine;
 use imt_tui::DataSource;
@@ -52,7 +64,11 @@ impl DataSource for SyncDataSource {
     }
 
     fn folders(&self, account: AccountId) -> Vec<Folder> {
-        self.snapshot.read(|s| s.folders_by_account.get(&account).cloned().unwrap_or_default())
+        let mut folders = self
+            .snapshot
+            .read(|s| s.folders_by_account.get(&account).cloned().unwrap_or_default());
+        folders.sort_by_key(|f| (folder_sort_key(f.role), f.name.to_lowercase()));
+        folders
     }
 
     fn messages(&self, folder: FolderId) -> Vec<Message> {

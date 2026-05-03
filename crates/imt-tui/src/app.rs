@@ -623,6 +623,7 @@ impl App {
                 let folder = self.current_folder().map(|f| f.id);
                 self.data.refresh(acc, folder);
                 self.set_status("refreshing...");
+                self.backend_status = "refreshing".into();
             }
         }
     }

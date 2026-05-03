@@ -121,7 +121,9 @@ impl DataSource for InMemoryDataSource {
 
     fn folders(&self, account: AccountId) -> Vec<Folder> {
         let store = self.inner.lock().unwrap();
-        store.folders.get(&account).cloned().unwrap_or_default()
+        let mut folders = store.folders.get(&account).cloned().unwrap_or_default();
+        folders.sort_by_key(|f| (folder_sort_key(f.role), f.name.to_lowercase()));
+        folders
     }
 
     fn messages(&self, folder: FolderId) -> Vec<Message> {
@@ -210,6 +212,18 @@ impl DataSource for InMemoryDataSource {
             }
         }
         out
+    }
+}
+
+fn folder_sort_key(role: FolderRole) -> u8 {
+    match role {
+        FolderRole::Inbox => 0,
+        FolderRole::Other => 1,
+        FolderRole::Archive => 2,
+        FolderRole::Sent => 3,
+        FolderRole::Junk => 4,
+        FolderRole::Trash => 5,
+        FolderRole::Drafts => 6,
     }
 }
 

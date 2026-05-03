@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-05-03
+
+### Added
+- Refresh action now flips `backend_status` to `refreshing` immediately so the spinner and "Loading..." indicators are visible even when the engine completes the sync in well under one tick.
+
+### Changed
+- Folder list ordering: Inbox, custom folders, Archive, Sent, Junk, Trash, **Drafts last**. Applies to both the live backend and the in-memory mock.
+
 ## [0.0.5] - 2026-05-03
 
 ### Fixed
