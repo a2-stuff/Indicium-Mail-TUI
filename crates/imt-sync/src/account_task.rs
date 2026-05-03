@@ -23,8 +23,19 @@ const SNIPPET_MAX: usize = 256;
 const BACKOFF_INITIAL_SECS: u64 = 5;
 const BACKOFF_MAX_SECS: u64 = 300;
 
-/// Convert `imt_net::FolderInfo` plus a stable `FolderId` into `imt_core::Folder`.
-fn to_folder(account_id: AccountId, id: FolderId, info: &FolderInfo) -> Folder {
+/// Convert `imt_net::FolderInfo` into `imt_core::Folder`, preserving any
+/// existing `uid_next` / counts so we don't blindly trust the LIST
+/// response and skip a needed envelope fetch.
+fn to_folder(
+    account_id: AccountId,
+    id: FolderId,
+    info: &FolderInfo,
+    existing: Option<&Folder>,
+) -> Folder {
+    let (uid_next, message_count, unread_count) = match existing {
+        Some(f) => (f.uid_next, f.message_count, f.unread_count),
+        None => (0, 0, 0),
+    };
     Folder {
         id,
         account_id,
@@ -32,9 +43,9 @@ fn to_folder(account_id: AccountId, id: FolderId, info: &FolderInfo) -> Folder {
         name: info.name.clone(),
         role: info.role,
         uid_validity: info.uid_validity,
-        uid_next: info.uid_next,
-        message_count: info.message_count,
-        unread_count: info.unread_count,
+        uid_next,
+        message_count,
+        unread_count,
     }
 }
 
@@ -215,16 +226,14 @@ async fn sync_folder_list<B: MailBackend>(
         .list_by_account(ctx.account.id)
         .await
         .map_err(|e| SyncErrorReason::Other(format!("list folders (db): {}", e)))?;
-    let by_path: HashMap<String, FolderId> =
-        existing.iter().map(|f| (f.path.clone(), f.id)).collect();
+    let by_path: HashMap<String, &Folder> =
+        existing.iter().map(|f| (f.path.clone(), f)).collect();
 
     let mut out = Vec::with_capacity(infos.len());
     for info in &infos {
-        let id = by_path
-            .get(&info.path)
-            .copied()
-            .unwrap_or_else(FolderId::new);
-        let folder = to_folder(ctx.account.id, id, info);
+        let prev = by_path.get(&info.path).copied();
+        let id = prev.map(|f| f.id).unwrap_or_else(FolderId::new);
+        let folder = to_folder(ctx.account.id, id, info, prev);
         folder_repo
             .upsert(&folder)
             .await
@@ -281,10 +290,26 @@ async fn sync_one_folder<B: MailBackend>(
         return Ok(());
     };
 
+    let range_dbg = format!("{:?}", range);
+    info!(
+        target: "imt-sync::account_task",
+        folder = %folder.path,
+        range = %range_dbg,
+        last_uid_next = last_uid_next,
+        server_uid_next = state.uid_next,
+        server_exists = state.exists,
+        "fetching envelopes"
+    );
     let envelopes = backend
         .fetch_envelopes(&folder.path, range)
         .await
         .map_err(|e| SyncErrorReason::Other(format!("fetch envelopes: {}", e)))?;
+    info!(
+        target: "imt-sync::account_task",
+        folder = %folder.path,
+        count = envelopes.len(),
+        "envelopes fetched"
+    );
 
     let msg_repo = MessageRepo::new(ctx.db.pool());
     for env in envelopes {

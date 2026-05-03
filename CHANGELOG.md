@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-05-03
+
+### Fixed
+- **Critical**: messages were never persisted on first sync after a folder had pre-existing UIDs. `sync_folder_list` was overwriting `uid_next` with the server's UIDNEXT before `sync_one_folder` ran, so the fetch range computation saw `last_uid_next == server.uid_next` and skipped the envelope fetch entirely. Now the existing `uid_next` and counts are preserved during folder metadata refresh; counts are only updated after a successful envelope fetch.
+
+### Added
+- Diagnostic logging at INFO level for envelope fetch range, fetched count, and server UIDNEXT to help future debugging.
+
+### Notes
+- Indicium Mail TUI does not, and never has, deleted messages from the server during sync. All IMAP fetches use `BODY.PEEK[]` (which preserves the `\Seen` state) and the codebase has no `EXPUNGE` or `\Deleted` flag setter outside the explicit user-initiated delete action. A Settings panel exposing `leave on server`, auto-refresh interval, mark-as-read-on-open, and other knobs is planned for the next release.
+
 ## [0.0.6] - 2026-05-03
 
 ### Added
