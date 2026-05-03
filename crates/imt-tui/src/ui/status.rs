@@ -20,9 +20,10 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Settings => "SETTINGS",
         Mode::Accounts => "ACCOUNTS",
         Mode::Move => "MOVE",
+        Mode::Info => "INFO",
     };
     let hints = match app.mode {
-        Mode::Normal => "[c] compose | [Enter] open | [m] accounts | [,] settings | [/] search | [?] help | [q] quit",
+        Mode::Normal => "[c] compose | [Enter] open | [m] accounts | [,] settings | [/] search | [?] help | [q] quit | [i] info",
         Mode::Compose => "Tab next  Ctrl-S send  Ctrl-D save  Esc cancel",
         Mode::Search => "type to search  Enter jump  Esc cancel",
         Mode::Help => "Esc / ? close",
@@ -30,6 +31,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Settings => "Tab next  Space toggle  Ctrl-S save  Esc cancel",
         Mode::Accounts => "j/k move  Enter edit  d delete  a add  Esc close",
         Mode::Move => "j/k move  Enter select  Esc cancel",
+        Mode::Info => "Esc / q / i  close",
     };
     let (sync_text, sync_style) = if app.is_busy() {
         (format!("[{} {}]", app.spinner_frame(), app.backend_status), theme::accent())

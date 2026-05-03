@@ -21,6 +21,7 @@ pub enum Mode {
     Settings,
     Accounts,
     Move,
+    Info,
 }
 
 /// Field focus inside the onboarding modal.
@@ -160,6 +161,8 @@ pub enum KeyAction {
     OpenMoveModal,
     MoveCancel,
     MoveSelect,
+    OpenInfo,
+    CloseInfo,
 }
 
 /// Translate a key event to a `KeyAction` in normal mode (compose mode handled separately).
@@ -173,6 +176,7 @@ pub fn map_key(focus: Focus, mode: Mode, key: KeyEvent) -> Option<KeyAction> {
         Mode::Settings => map_settings(key),
         Mode::Accounts => map_accounts(key),
         Mode::Move => map_move(key),
+        Mode::Info => map_info(key),
     }
 }
 
@@ -246,6 +250,14 @@ fn map_normal(focus: Focus, key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('v') => Some(KeyAction::OpenMoveModal),
         KeyCode::Char(',') => Some(KeyAction::OpenSettings),
         KeyCode::Char('m') => Some(KeyAction::OpenAccounts),
+        KeyCode::Char('i') => Some(KeyAction::OpenInfo),
+        _ => None,
+    }
+}
+
+fn map_info(key: KeyEvent) -> Option<KeyAction> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('i') => Some(KeyAction::CloseInfo),
         _ => None,
     }
 }

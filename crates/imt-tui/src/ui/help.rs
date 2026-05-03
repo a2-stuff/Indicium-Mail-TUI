@@ -59,6 +59,7 @@ pub fn render(f: &mut Frame, full: Rect) {
     lines.extend(group(&[
         ("m", "account manager"),
         (",", "settings"),
+        ("i", "about / info"),
         ("Ctrl-R / Ctrl-L", "refresh"),
         ("?", "toggle help"),
         ("q", "quit"),

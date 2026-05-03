@@ -625,6 +625,12 @@ impl App {
             }
             return;
         }
+        if self.mode == Mode::Info {
+            if let Some(action) = map_key(self.focus, self.mode, key) {
+                self.dispatch(action);
+            }
+            return;
+        }
         if self.mode == Mode::Accounts || self.mode == Mode::Move {
             if let Some(action) = map_key(self.focus, self.mode, key) {
                 self.dispatch(action);
@@ -802,6 +808,8 @@ impl App {
                 self.mode = Mode::Normal;
             }
             KeyAction::MoveSelect => self.move_select(),
+            KeyAction::OpenInfo => self.mode = Mode::Info,
+            KeyAction::CloseInfo => self.mode = Mode::Normal,
         }
     }
 

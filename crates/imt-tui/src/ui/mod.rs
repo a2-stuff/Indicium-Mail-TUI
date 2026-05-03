@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod compose;
 pub mod help;
+pub mod info;
 pub mod layout;
 pub mod list;
 pub mod move_modal;
@@ -45,5 +46,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if app.mode == Mode::Move {
         move_modal::render_modal(f, f.area(), app);
+    }
+    if app.mode == Mode::Info {
+        info::render(f, f.area());
     }
 }
