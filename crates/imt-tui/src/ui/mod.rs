@@ -13,6 +13,7 @@ pub mod search;
 pub mod settings;
 pub mod sidebar;
 pub mod status;
+pub mod toast;
 
 use ratatui::Frame;
 
@@ -50,4 +51,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.mode == Mode::Info {
         info::render(f, f.area());
     }
+    // Toast always renders last so it floats above all other content.
+    toast::render(f, f.area(), app);
 }

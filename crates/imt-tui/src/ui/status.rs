@@ -23,7 +23,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Info => "INFO",
     };
     let hints = match app.mode {
-        Mode::Normal => "[c] compose | [Enter] open | [m] accounts | [,] settings | [/] search | [?] help | [q] quit | [i] info",
+        Mode::Normal => "[c] compose  [Enter] open  [m] accounts  [,] settings  [/] search  [?] help  [q] quit  [i] info",
         Mode::Compose => "Tab next  Ctrl-S send  Ctrl-D save  Esc cancel",
         Mode::Search => "type to search  Enter jump  Esc cancel",
         Mode::Help => "Esc / ? close",
@@ -34,17 +34,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Info => "Esc / q / i  close",
     };
     let (sync_text, sync_style) = if app.is_busy() {
-        (format!("[{} {}]", app.spinner_frame(), app.backend_status), theme::accent())
+        (format!(" {} {} ", app.spinner_frame(), app.backend_status), theme::accent())
     } else if app.backend_status.is_empty() {
-        ("[ready]".to_string(), theme::success())
+        (" ready ".to_string(), theme::success())
     } else {
-        (format!("[{}]", app.backend_status), theme::success())
+        (format!(" {} ", app.backend_status), theme::success())
     };
     let line = Line::from(vec![
         Span::styled(format!(" {} ", mode), theme::accent()),
         Span::styled(format!(" {} ", hints), theme::muted()),
-        Span::styled(format!(" {} ", app.status), theme::normal()),
-        Span::styled(format!(" {} ", sync_text), sync_style),
+        Span::styled(sync_text, sync_style),
     ]);
     let p = Paragraph::new(line).style(theme::status());
     f.render_widget(p, area);

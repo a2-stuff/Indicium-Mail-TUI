@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.14] - 2026-05-03
+
+### Added
+- **Toast notifications**: transient status messages (account added, moved, refreshing, errors, etc.) now appear as a floating rounded-border box in the bottom-right corner instead of being squeezed into the status bar. Error messages render in red; informational ones in the accent colour. The toast auto-clears after ~6 seconds as before.
+
+### Changed
+- Status bar: removed `|` separators between hotkey hints - now separated by two spaces.
+- Status bar: removed the inline status text (replaced by the toast overlay).
+- Sync indicator in the status bar simplified: `[ready]` / `[⠙ syncing]` - brackets dropped, just the text.
+- **Auto-refresh default changed from 0 (off) to 60 seconds.** New mail is checked every 60 seconds across all folders in addition to the IMAP IDLE push on the inbox. Set to 0 in Settings to disable polling and rely on IDLE only.
+
 ## [0.0.13] - 2026-05-03
 
 ### Fixed

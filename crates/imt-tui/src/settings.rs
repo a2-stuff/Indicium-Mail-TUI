@@ -21,7 +21,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            auto_refresh_secs: 0,
+            auto_refresh_secs: 60,
             mark_read_on_open: true,
             html_external: false,
             browser: String::new(),

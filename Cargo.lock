@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "imt"
-version = "0.0.12"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "imt-core"
-version = "0.0.12"
+version = "0.0.14"
 dependencies = [
  "bytes",
  "chrono",
@@ -1292,7 +1292,7 @@ dependencies = [
 
 [[package]]
 name = "imt-net"
-version = "0.0.12"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "async-imap",
@@ -1319,7 +1319,7 @@ dependencies = [
 
 [[package]]
 name = "imt-store"
-version = "0.0.12"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1338,7 +1338,7 @@ dependencies = [
 
 [[package]]
 name = "imt-sync"
-version = "0.0.12"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1356,7 +1356,7 @@ dependencies = [
 
 [[package]]
 name = "imt-tui"
-version = "0.0.12"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "chrono",
