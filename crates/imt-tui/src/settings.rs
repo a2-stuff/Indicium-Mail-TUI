@@ -1,21 +1,18 @@
-//! User-configurable runtime settings (auto-refresh interval, mark-as-read,
-//! HTML viewer, etc). Mirrored to/from `config.toml` by the binary.
+//! User-configurable runtime settings. Mirrored to/from `config.toml`.
 
 use serde::{Deserialize, Serialize};
 
-/// User-tunable behavior.
+use crate::theme::ThemeName;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    /// Auto-refresh interval in seconds. 0 disables (IDLE still active).
     pub auto_refresh_secs: u32,
-    /// Mark a message as `\Seen` when it is opened.
     pub mark_read_on_open: bool,
-    /// Render HTML bodies inline via `html2text` (false) or open in `$BROWSER` (true).
     pub html_external: bool,
-    /// Browser command for HTML mail. Empty falls back to `xdg-open`.
     pub browser: String,
-    /// Show the message preview snippet under each row in the list.
     pub show_snippet: bool,
+    #[serde(default)]
+    pub theme: ThemeName,
 }
 
 impl Default for Settings {
@@ -26,11 +23,11 @@ impl Default for Settings {
             html_external: false,
             browser: String::new(),
             show_snippet: false,
+            theme: ThemeName::Midnight,
         }
     }
 }
 
-/// Field focus inside the Settings modal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsField {
     AutoRefreshSecs,
@@ -38,25 +35,28 @@ pub enum SettingsField {
     HtmlExternal,
     Browser,
     ShowSnippet,
+    Theme,
 }
 
 impl SettingsField {
     pub fn next(self) -> Self {
         match self {
             Self::AutoRefreshSecs => Self::MarkReadOnOpen,
-            Self::MarkReadOnOpen => Self::HtmlExternal,
-            Self::HtmlExternal => Self::Browser,
-            Self::Browser => Self::ShowSnippet,
-            Self::ShowSnippet => Self::AutoRefreshSecs,
+            Self::MarkReadOnOpen  => Self::HtmlExternal,
+            Self::HtmlExternal    => Self::Browser,
+            Self::Browser         => Self::ShowSnippet,
+            Self::ShowSnippet     => Self::Theme,
+            Self::Theme           => Self::AutoRefreshSecs,
         }
     }
     pub fn prev(self) -> Self {
         match self {
-            Self::AutoRefreshSecs => Self::ShowSnippet,
-            Self::MarkReadOnOpen => Self::AutoRefreshSecs,
-            Self::HtmlExternal => Self::MarkReadOnOpen,
-            Self::Browser => Self::HtmlExternal,
-            Self::ShowSnippet => Self::Browser,
+            Self::AutoRefreshSecs => Self::Theme,
+            Self::MarkReadOnOpen  => Self::AutoRefreshSecs,
+            Self::HtmlExternal    => Self::MarkReadOnOpen,
+            Self::Browser         => Self::HtmlExternal,
+            Self::ShowSnippet     => Self::Browser,
+            Self::Theme           => Self::ShowSnippet,
         }
     }
 }

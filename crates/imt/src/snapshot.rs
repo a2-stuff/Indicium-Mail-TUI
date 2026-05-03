@@ -1,7 +1,7 @@
 //! In-memory snapshot of mail state, refreshed from `SyncEvent`s and
 //! initial loads from the store. Provides O(1) sync reads for the TUI.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
@@ -19,6 +19,8 @@ pub struct SnapshotInner {
     pub bodies: HashMap<MessageId, MessageBody>,
     pub drafts: Vec<Draft>,
     pub status: String,
+    /// Pending toast notifications for the TUI to drain (errors, new mail, etc).
+    pub notifications: VecDeque<String>,
 }
 
 /// Cheap-clone handle to the snapshot.
@@ -46,6 +48,16 @@ impl Snapshot {
     /// Set the status line text.
     pub fn set_status(&self, text: impl Into<String>) {
         self.write(|s| s.status = text.into());
+    }
+
+    /// Queue a toast notification (errors, new mail, etc).
+    pub fn push_notification(&self, text: impl Into<String>) {
+        self.write(|s| s.notifications.push_back(text.into()));
+    }
+
+    /// Drain the next pending notification, if any.
+    pub fn pop_notification(&self) -> Option<String> {
+        self.write(|s| s.notifications.pop_front())
     }
 
     /// Hydrate the snapshot from the database. Loads all accounts, folders,
@@ -86,7 +98,10 @@ impl Snapshot {
             SyncEvent::AccountDisconnected { reason, .. } => {
                 self.set_status(format!("disconnected: {}", reason))
             }
-            SyncEvent::Error { message, .. } => self.set_status(format!("error: {}", message)),
+            SyncEvent::Error { message, .. } => {
+                self.push_notification(format!("Error: {}", message));
+                self.set_status(String::new());
+            }
             SyncEvent::SyncStarted { .. } => self.set_status("syncing"),
             SyncEvent::SyncFinished { .. } => self.set_status("idle"),
             SyncEvent::FolderListUpdated { account_id } => {
@@ -105,8 +120,22 @@ impl Snapshot {
                     }
                 });
             }
-            SyncEvent::MessageAdded { folder_id, .. } => {
+            SyncEvent::MessageAdded { folder_id, message_id } => {
                 let msgs = MessageRepo::new(pool).list_by_folder(*folder_id, 500, 0).await?;
+                // Notify if this is an inbox folder and the message is new (not Seen).
+                if let Some(msg) = msgs.iter().find(|m| m.id == *message_id) {
+                    let is_inbox = self.read(|s| {
+                        s.folders_by_account.values().any(|fs| {
+                            fs.iter().any(|f| f.id == *folder_id && f.role == imt_core::FolderRole::Inbox)
+                        })
+                    });
+                    if is_inbox && !msg.flags.contains(&imt_core::Flag::Seen) {
+                        let from = msg.headers.from.first()
+                            .map(|a| a.format())
+                            .unwrap_or_else(|| "Unknown".into());
+                        self.push_notification(format!("New mail from {}:\n{}", from, msg.headers.subject));
+                    }
+                }
                 self.write(|s| {
                     s.messages_by_folder.insert(*folder_id, msgs);
                 });

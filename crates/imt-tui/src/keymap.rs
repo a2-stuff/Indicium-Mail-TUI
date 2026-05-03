@@ -23,6 +23,8 @@ pub enum Mode {
     Move,
     Info,
     FilePicker,
+    AttachmentViewer,
+    HtmlViewer,
 }
 
 /// Field focus inside the onboarding modal.
@@ -37,12 +39,19 @@ pub enum OnboardingField {
     SmtpPort,
     SmtpTls,
     Username,
+    // Auth selection — Password or OAuth2
+    AuthType,
+    // Password branch
     Password,
+    // OAuth2 branch
+    ClientId,
+    ClientSecret,
+    AuthCode,
 }
 
 impl OnboardingField {
-    /// Cycle to the next onboarding field.
-    pub fn next(self) -> Self {
+    /// Cycle to the next onboarding field. `oauth2` selects the OAuth2 branch.
+    pub fn next(self, oauth2: bool) -> Self {
         match self {
             Self::DisplayName => Self::Email,
             Self::Email => Self::ImapHost,
@@ -52,14 +61,18 @@ impl OnboardingField {
             Self::SmtpHost => Self::SmtpPort,
             Self::SmtpPort => Self::SmtpTls,
             Self::SmtpTls => Self::Username,
-            Self::Username => Self::Password,
+            Self::Username => Self::AuthType,
+            Self::AuthType => if oauth2 { Self::ClientId } else { Self::Password },
             Self::Password => Self::DisplayName,
+            Self::ClientId => Self::ClientSecret,
+            Self::ClientSecret => Self::AuthCode,
+            Self::AuthCode => Self::DisplayName,
         }
     }
     /// Cycle to the previous onboarding field.
-    pub fn prev(self) -> Self {
+    pub fn prev(self, oauth2: bool) -> Self {
         match self {
-            Self::DisplayName => Self::Password,
+            Self::DisplayName => if oauth2 { Self::AuthCode } else { Self::Password },
             Self::Email => Self::DisplayName,
             Self::ImapHost => Self::Email,
             Self::ImapPort => Self::ImapHost,
@@ -68,7 +81,11 @@ impl OnboardingField {
             Self::SmtpPort => Self::SmtpHost,
             Self::SmtpTls => Self::SmtpPort,
             Self::Username => Self::SmtpTls,
-            Self::Password => Self::Username,
+            Self::AuthType => Self::Username,
+            Self::Password => Self::AuthType,
+            Self::ClientId => Self::AuthType,
+            Self::ClientSecret => Self::ClientId,
+            Self::AuthCode => Self::ClientSecret,
         }
     }
 }
@@ -147,7 +164,7 @@ pub enum KeyAction {
     CancelOnboarding,
     OnboardingCycleLeft,
     OnboardingCycleRight,
-    OpenHtmlInBrowser,
+    OpenHtmlViewer,
     Refresh,
     OpenSettings,
     SaveSettings,
@@ -168,6 +185,13 @@ pub enum KeyAction {
     FilePickerParent,
     FilePickerConfirm,
     FilePickerCancel,
+    ThemeCycleLeft,
+    ThemeCycleRight,
+    OpenAttachments,
+    AttachmentView,
+    AttachmentSave,
+    AttachmentClose,
+    CloseHtmlViewer,
 }
 
 /// Translate a key event to a `KeyAction` in normal mode (compose mode handled separately).
@@ -183,6 +207,17 @@ pub fn map_key(focus: Focus, mode: Mode, key: KeyEvent) -> Option<KeyAction> {
         Mode::Move => map_move(key),
         Mode::Info => map_info(key),
         Mode::FilePicker => map_file_picker(key),
+        Mode::AttachmentViewer => map_attachment_viewer(key),
+        Mode::HtmlViewer => map_html_viewer(key),
+    }
+}
+
+fn map_html_viewer(key: KeyEvent) -> Option<KeyAction> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') => Some(KeyAction::CloseHtmlViewer),
+        KeyCode::Up | KeyCode::Char('k') => Some(KeyAction::Up),
+        KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Down),
+        _ => None,
     }
 }
 
@@ -203,6 +238,8 @@ fn map_settings(key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Esc => Some(KeyAction::CancelSettings),
         KeyCode::Tab => Some(KeyAction::FocusNext),
         KeyCode::BackTab => Some(KeyAction::FocusPrev),
+        KeyCode::Left => Some(KeyAction::ThemeCycleLeft),
+        KeyCode::Right => Some(KeyAction::ThemeCycleRight),
         KeyCode::Char(' ') | KeyCode::Enter => Some(KeyAction::SettingsToggle),
         _ => None,
     }
@@ -252,11 +289,23 @@ fn map_normal(focus: Focus, key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('}') => Some(KeyAction::NextAccount),
         KeyCode::Char('{') => Some(KeyAction::PrevAccount),
         KeyCode::Char('A') if focus == Focus::Sidebar => Some(KeyAction::OpenOnboarding),
-        KeyCode::Char('o') => Some(KeyAction::OpenHtmlInBrowser),
+        KeyCode::Char('o') if focus == Focus::Reader => Some(KeyAction::OpenHtmlViewer),
         KeyCode::Char('v') => Some(KeyAction::OpenMoveModal),
         KeyCode::Char(',') => Some(KeyAction::OpenSettings),
         KeyCode::Char('m') => Some(KeyAction::OpenAccounts),
         KeyCode::Char('i') => Some(KeyAction::OpenInfo),
+        KeyCode::Char('a') if focus == Focus::Reader => Some(KeyAction::OpenAttachments),
+        _ => None,
+    }
+}
+
+fn map_attachment_viewer(key: KeyEvent) -> Option<KeyAction> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(KeyAction::AttachmentClose),
+        KeyCode::Up | KeyCode::Char('k') => Some(KeyAction::Up),
+        KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Down),
+        KeyCode::Enter => Some(KeyAction::AttachmentView),
+        KeyCode::Char('s') => Some(KeyAction::AttachmentSave),
         _ => None,
     }
 }
@@ -269,16 +318,13 @@ fn map_info(key: KeyEvent) -> Option<KeyAction> {
 }
 
 fn map_file_picker(key: KeyEvent) -> Option<KeyAction> {
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => Some(KeyAction::FilePickerCancel),
         KeyCode::Up | KeyCode::Char('k') => Some(KeyAction::Up),
         KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Down),
-        KeyCode::Enter | KeyCode::Char(' ') => Some(KeyAction::FilePickerToggle),
+        KeyCode::Char(' ') => Some(KeyAction::FilePickerToggle),
+        KeyCode::Enter => Some(KeyAction::FilePickerConfirm),
         KeyCode::Backspace => Some(KeyAction::FilePickerParent),
-        KeyCode::Char('A') => Some(KeyAction::FilePickerConfirm),
-        KeyCode::Char('a') if ctrl => Some(KeyAction::FilePickerConfirm),
-        KeyCode::Char('a') => Some(KeyAction::FilePickerConfirm),
         _ => None,
     }
 }

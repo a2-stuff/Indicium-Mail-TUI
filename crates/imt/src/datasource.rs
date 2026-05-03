@@ -30,7 +30,7 @@ use crate::snapshot::Snapshot;
 /// Asynchronous commands posted from the sync `DataSource` to a worker that
 /// owns the `SyncEngine`. Fire-and-forget; results land via `SyncEvent`s.
 pub enum Command {
-    AddAccount { account: Account, password: String },
+    AddAccount { account: Account, password: String, oauth_exchange: Option<imt_sync::engine::OAuthExchange> },
     UpdateAccount { account: Account, password: Option<String> },
     DeleteAccount { id: AccountId },
     SaveDraft(Draft),
@@ -209,10 +209,21 @@ impl DataSource for SyncDataSource {
     fn add_account(&self, form: NewAccountForm) -> Result<AccountId> {
         let order = self.snapshot.read(|s| s.accounts.len() as i32);
         let password = form.password.clone();
+        let oauth_exchange = if form.is_oauth2() && !form.oauth_code.is_empty() {
+            Some(imt_sync::engine::OAuthExchange {
+                client_id: form.oauth_client_id.clone(),
+                client_secret: form.oauth_client_secret.clone(),
+                code: form.oauth_code.clone(),
+                verifier: form.oauth_verifier.clone(),
+                redirect_uri: form.oauth_redirect_uri.clone(),
+            })
+        } else {
+            None
+        };
         let account = form.into_account(order);
         let id = account.id;
         self.snapshot.add_local_account(account.clone());
-        self.commands.send(Command::AddAccount { account, password })
+        self.commands.send(Command::AddAccount { account, password, oauth_exchange })
             .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
         Ok(id)
     }
@@ -250,6 +261,10 @@ impl DataSource for SyncDataSource {
         self.snapshot.read(|s| s.status.clone())
     }
 
+    fn pop_notification(&self) -> Option<String> {
+        self.snapshot.pop_notification()
+    }
+
     fn refresh(&self, account: Option<AccountId>, folder: Option<FolderId>) {
         let cmd = match (account, folder) {
             (Some(a), Some(f)) => Command::SyncFolder { account: a, folder: f },
@@ -271,51 +286,70 @@ pub async fn command_worker(
 ) {
     while let Some(cmd) = rx.recv().await {
         match cmd {
-            Command::AddAccount { account, password } => {
+            Command::AddAccount { account, password, oauth_exchange } => {
                 let id = account.id;
-                if let Err(e) = engine.add_account(account, password).await {
-                    snapshot.set_status(format!("add account failed: {}", e));
+                if let Err(e) = engine.add_account(account, password, oauth_exchange).await {
+                    snapshot.push_notification(format!("Add account failed: {}", e));
                     snapshot.write(|s| s.accounts.retain(|a| a.id != id));
                 }
             }
             Command::UpdateAccount { account, password } => {
                 let id = account.id;
                 if let Err(e) = engine.update_account(account, password).await {
-                    snapshot.set_status(format!("update account failed: {}", e));
+                    snapshot.push_notification(format!("Update account failed: {}", e));
                 } else {
-                    snapshot.set_status("account updated");
+                    snapshot.push_notification("Account updated".to_string());
                     let _ = id;
                 }
             }
             Command::DeleteAccount { id } => {
                 if let Err(e) = engine.remove_account(id).await {
-                    snapshot.set_status(format!("delete account failed: {}", e));
+                    snapshot.push_notification(format!("Delete account failed: {}", e));
                 } else {
-                    snapshot.set_status("account deleted");
+                    snapshot.push_notification("Account deleted".to_string());
                 }
             }
             Command::SaveDraft(draft) => {
                 if let Err(e) = DraftRepo::new(db.pool()).upsert(&draft).await {
-                    snapshot.set_status(format!("save draft failed: {}", e));
+                    snapshot.push_notification(format!("Save draft failed: {}", e));
+                } else {
+                    // Best-effort: also append to IMAP Drafts folder so it appears when navigating there.
+                    if let Err(e) = engine.save_draft_to_imap(&draft).await {
+                        tracing::warn!("save_draft_to_imap: {}", e);
+                    } else {
+                        // Re-sync the Drafts folder so the new draft appears immediately.
+                        let drafts_folder = snapshot.read(|s| {
+                            s.folders_by_account.values()
+                                .flat_map(|fs| fs.iter())
+                                .find(|f| f.role == imt_core::FolderRole::Drafts)
+                                .map(|f| (f.account_id, f.id))
+                        });
+                        if let Some((aid, fid)) = drafts_folder {
+                            if let Err(e) = engine.sync_folder(aid, fid).await {
+                                tracing::warn!("sync drafts folder: {}", e);
+                            }
+                        }
+                    }
+                    snapshot.push_notification("Draft saved".to_string());
                 }
             }
             Command::Send(draft) => {
                 if let Err(e) = engine.send(&draft).await {
-                    snapshot.set_status(format!("send failed: {}", e));
+                    snapshot.push_notification(format!("Send failed: {}", e));
                 } else {
-                    snapshot.set_status("sent");
+                    snapshot.push_notification("Sent".to_string());
                 }
             }
             Command::FetchBody(mid) => {
                 match engine.fetch_body(mid).await {
                     Ok(body) => snapshot.write(|s| { s.bodies.insert(mid, body); }),
-                    Err(e) => snapshot.set_status(format!("fetch body failed: {}", e)),
+                    Err(e) => snapshot.push_notification(format!("Fetch body failed: {}", e)),
                 }
                 in_flight_bodies.lock().unwrap().remove(&mid);
             }
             Command::SyncFolder { account, folder } => {
                 if let Err(e) = engine.sync_folder(account, folder).await {
-                    snapshot.set_status(format!("sync failed: {}", e));
+                    snapshot.push_notification(format!("Sync failed: {}", e));
                 }
             }
             Command::SyncAccount { account } => {
@@ -326,18 +360,18 @@ pub async fn command_worker(
                 });
                 for fid in folder_ids {
                     if let Err(e) = engine.sync_folder(account, fid).await {
-                        snapshot.set_status(format!("sync failed: {}", e));
+                        snapshot.push_notification(format!("Sync failed: {}", e));
                     }
                 }
             }
             Command::Move { message_id, dest_folder } => {
                 if let Err(e) = engine.move_message(message_id, dest_folder).await {
-                    snapshot.set_status(format!("move failed: {}", e));
+                    snapshot.push_notification(format!("Move failed: {}", e));
                 }
             }
             Command::Delete { message_id } => {
                 let _ = message_id;
-                snapshot.set_status("delete: no Trash folder, message kept");
+                snapshot.push_notification("No Trash folder found - message kept on server".to_string());
             }
             Command::SyncAll => {
                 let pairs = snapshot.read(|s| {
@@ -347,13 +381,13 @@ pub async fn command_worker(
                 });
                 for (aid, fid) in pairs {
                     if let Err(e) = engine.sync_folder(aid, fid).await {
-                        snapshot.set_status(format!("sync failed: {}", e));
+                        snapshot.push_notification(format!("Sync failed: {}", e));
                     }
                 }
             }
             Command::SetFlag { message_id, flag, add } => {
                 if let Err(e) = engine.set_flag(message_id, flag, add).await {
-                    snapshot.set_status(format!("set flag failed: {}", e));
+                    snapshot.push_notification(format!("Set flag failed: {}", e));
                 }
             }
         }

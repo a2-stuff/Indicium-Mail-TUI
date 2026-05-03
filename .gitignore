@@ -8,3 +8,13 @@ Cargo.lock.bak
 
 # Per-agent target dirs used during parallel scaffold
 /target-*
+
+# Sensitive runtime data - never commit these
+*.db
+*.db-shm
+*.db-wal
+secrets.*
+credentials.*
+config.toml
+*.pem
+*.key

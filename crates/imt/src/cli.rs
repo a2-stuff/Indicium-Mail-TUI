@@ -106,6 +106,11 @@ pub async fn add_account(db_path: &Path, args: AddAccountArgs) -> Result<()> {
         smtp_tls,
         username,
         password: password.clone(),
+        oauth_client_id: String::new(),
+        oauth_client_secret: String::new(),
+        oauth_code: String::new(),
+        oauth_verifier: String::new(),
+        oauth_redirect_uri: String::new(),
     };
 
     let order = AccountRepo::new(db.pool()).list().await?.len() as i32;

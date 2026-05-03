@@ -39,6 +39,9 @@ pub struct Attachment {
     pub part_id: String,
     pub content_id: Option<String>,
     pub inline: bool,
+    /// Path to a temp file holding the decoded bytes. Set after body fetch; not persisted to DB.
+    #[serde(skip)]
+    pub temp_path: Option<std::path::PathBuf>,
 }
 
 /// Decoded body bundles.

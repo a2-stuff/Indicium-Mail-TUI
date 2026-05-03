@@ -103,7 +103,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(list, rows[0], &mut ls);
 
     let footer = Paragraph::new(Span::styled(
-        " j/k navigate  Enter toggle/enter  Backspace up  a confirm  Esc cancel ",
+        " [↑↓] move  [Space] select  [Enter] confirm  [Backspace] up  [Esc] cancel",
         theme::muted(),
     ))
     .alignment(Alignment::Center);

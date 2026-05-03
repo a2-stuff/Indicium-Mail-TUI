@@ -1,6 +1,7 @@
 //! UI rendering: panes, modals, overlays.
 
 pub mod accounts;
+pub mod attachment_viewer;
 pub mod compose;
 pub mod file_picker;
 pub mod help;
@@ -54,6 +55,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if app.mode == Mode::FilePicker {
         file_picker::render(f, f.area(), app);
+    }
+    if app.mode == Mode::AttachmentViewer {
+        attachment_viewer::render(f, f.area(), app);
+    }
+    if app.mode == Mode::HtmlViewer {
+        if let Some((ref content, scroll)) = app.html_viewer {
+            attachment_viewer::render_html_viewer(f, f.area(), content, scroll);
+        }
     }
     // Toast always renders last so it floats above all other content.
     toast::render(f, f.area(), app);

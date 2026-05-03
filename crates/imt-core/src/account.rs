@@ -24,10 +24,61 @@ pub enum Tls {
     None,
 }
 
+/// OAuth2 provider type stored in account config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OAuthProvider {
+    Google,
+    Microsoft { tenant: String },
+    Yahoo,
+    /// Fully custom provider with explicit endpoints and scope.
+    Custom {
+        auth_url: String,
+        token_url: String,
+        scope: String,
+    },
+}
+
+impl OAuthProvider {
+    /// Best-guess provider from the IMAP hostname.
+    pub fn from_imap_host(host: &str) -> Option<Self> {
+        match host {
+            h if h.contains("gmail.com") || h.contains("googlemail.com") => Some(Self::Google),
+            h if h.contains("outlook") || h.contains("office365") || h.contains("microsoft") => {
+                Some(Self::Microsoft { tenant: "common".to_string() })
+            }
+            h if h.contains("yahoo") => Some(Self::Yahoo),
+            _ => None,
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Google => "Google / Gmail",
+            Self::Microsoft { .. } => "Microsoft / Office 365",
+            Self::Yahoo => "Yahoo Mail",
+            Self::Custom { .. } => "Custom",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuthMethod {
     Password { username: String },
-    OAuth2 { username: String, refresh_token_ref: String },
+    /// OAuth2 XOAUTH2. Tokens live in the secrets store; only metadata here.
+    OAuth2 {
+        username: String,
+        provider: OAuthProvider,
+        /// OAuth2 client_id registered by the user.
+        client_id: String,
+    },
+}
+
+impl AuthMethod {
+    pub fn username(&self) -> &str {
+        match self {
+            Self::Password { username } | Self::OAuth2 { username, .. } => username,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,12 +120,21 @@ pub struct NewAccountForm {
     pub smtp_port: u16,
     pub smtp_tls: Tls,
     pub username: String,
-    /// Plaintext password. Caller is responsible for forwarding to a secret store.
+    /// Plaintext password. Only used when auth_type is Password.
     pub password: String,
+    /// OAuth2 client_id. Non-empty selects OAuth2 auth.
+    pub oauth_client_id: String,
+    /// OAuth2 client_secret (optional; leave empty for PKCE-only flows).
+    pub oauth_client_secret: String,
+    /// OAuth2 authorization code to exchange for tokens.
+    pub oauth_code: String,
+    /// PKCE code verifier that was used when generating the auth URL.
+    pub oauth_verifier: String,
+    /// Redirect URI used when generating the auth URL.
+    pub oauth_redirect_uri: String,
 }
 
 impl NewAccountForm {
-    /// Reasonable defaults for a brand-new form (implicit TLS on standard ports).
     pub fn defaults() -> Self {
         Self {
             display_name: String::new(),
@@ -87,13 +147,35 @@ impl NewAccountForm {
             smtp_tls: Tls::Implicit,
             username: String::new(),
             password: String::new(),
+            oauth_client_id: String::new(),
+            oauth_client_secret: String::new(),
+            oauth_code: String::new(),
+            oauth_verifier: String::new(),
+            oauth_redirect_uri: String::new(),
         }
     }
 
-    /// Build a domain `Account` from the form (excluding the password, which is stored
-    /// separately by the caller).
+    /// Whether this form is configured for OAuth2 (vs password) auth.
+    pub fn is_oauth2(&self) -> bool {
+        !self.oauth_client_id.is_empty()
+    }
+
     pub fn into_account(self, order: i32) -> Account {
-        let auth = AuthMethod::Password { username: self.username.clone() };
+        let auth = if self.is_oauth2() {
+            let provider = OAuthProvider::from_imap_host(&self.imap_host)
+                .unwrap_or(OAuthProvider::Custom {
+                    auth_url: String::new(),
+                    token_url: String::new(),
+                    scope: String::new(),
+                });
+            AuthMethod::OAuth2 {
+                username: self.username.clone(),
+                provider,
+                client_id: self.oauth_client_id.clone(),
+            }
+        } else {
+            AuthMethod::Password { username: self.username.clone() }
+        };
         let display = if self.display_name.is_empty() { self.email.clone() } else { self.display_name.clone() };
         Account {
             id: AccountId::new(),

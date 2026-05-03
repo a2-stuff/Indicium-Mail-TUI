@@ -63,5 +63,10 @@ pub fn preset_for(email: &str) -> Option<NewAccountForm> {
         smtp_tls,
         username: String::new(),
         password: String::new(),
+        oauth_client_id: String::new(),
+        oauth_client_secret: String::new(),
+        oauth_code: String::new(),
+        oauth_verifier: String::new(),
+        oauth_redirect_uri: String::new(),
     })
 }

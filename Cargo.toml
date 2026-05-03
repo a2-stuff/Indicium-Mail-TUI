@@ -62,6 +62,9 @@ html2text = "0.13"
 # Auth / secrets
 keyring = "3"
 oauth2 = "4"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
 
 # Utilities
 directories = "5"

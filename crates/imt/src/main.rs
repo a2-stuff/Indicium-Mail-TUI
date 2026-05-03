@@ -183,7 +183,7 @@ async fn run_tui(mock: bool, db_path: &std::path::Path, cfg_path: Option<PathBuf
     let accounts = imt_store::AccountRepo::new(db.pool()).list().await?;
     for acc in accounts {
         let pwd = imt_store::secrets::load(acc.id, "imap_password").unwrap_or_default();
-        if let Err(e) = engine.add_account(acc.clone(), pwd).await {
+        if let Err(e) = engine.add_account(acc.clone(), pwd, None).await {
             tracing::warn!("spawn account worker for {}: {}", acc.address.email, e);
         }
     }

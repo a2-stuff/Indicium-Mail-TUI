@@ -77,7 +77,7 @@ pub fn render(f: &mut Frame, area: Rect) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "  MIT License - 2026 Indicium contributors",
+            "  MIT License - 2026 @not_jarod",
             theme::muted(),
         )),
     ];

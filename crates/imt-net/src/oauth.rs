@@ -24,25 +24,59 @@ pub enum OAuthProvider {
         /// Azure AD tenant; `common`, `consumers`, `organizations`, or a tenant id.
         tenant: String,
     },
+    /// Yahoo Mail OAuth2 endpoints.
+    Yahoo,
+    /// Fully custom provider.
+    Custom {
+        auth_url: String,
+        token_url: String,
+        scope: String,
+    },
 }
 
 impl OAuthProvider {
-    /// URL of the authorization endpoint.
-    pub fn auth_url(&self) -> &'static str {
-        match self {
-            OAuthProvider::Google => "https://accounts.google.com/o/oauth2/v2/auth",
-            OAuthProvider::Microsoft { .. } => "",
+    /// Infer provider from IMAP hostname.
+    pub fn from_imap_host(host: &str) -> Option<Self> {
+        if host.contains("gmail") || host.contains("googlemail") {
+            return Some(Self::Google);
+        }
+        if host.contains("outlook") || host.contains("office365") || host.contains("microsoft") {
+            return Some(Self::Microsoft { tenant: "common".to_string() });
+        }
+        if host.contains("yahoo") {
+            return Some(Self::Yahoo);
+        }
+        None
+    }
+
+    /// Build from the core `OAuthProvider` storage type.
+    pub fn from_core(p: &imt_core::OAuthProvider) -> Self {
+        match p {
+            imt_core::OAuthProvider::Google => Self::Google,
+            imt_core::OAuthProvider::Microsoft { tenant } => {
+                Self::Microsoft { tenant: tenant.clone() }
+            }
+            imt_core::OAuthProvider::Yahoo => Self::Yahoo,
+            imt_core::OAuthProvider::Custom { auth_url, token_url, scope } => Self::Custom {
+                auth_url: auth_url.clone(),
+                token_url: token_url.clone(),
+                scope: scope.clone(),
+            },
         }
     }
 
-    /// Owned authorization endpoint (Microsoft varies by tenant).
+    /// Owned authorization endpoint.
     pub fn auth_url_string(&self) -> String {
         match self {
-            OAuthProvider::Google => self.auth_url().to_string(),
+            OAuthProvider::Google => "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
             OAuthProvider::Microsoft { tenant } => format!(
                 "https://login.microsoftonline.com/{}/oauth2/v2.0/authorize",
                 tenant
             ),
+            OAuthProvider::Yahoo => {
+                "https://api.login.yahoo.com/oauth2/request_auth".to_string()
+            }
+            OAuthProvider::Custom { auth_url, .. } => auth_url.clone(),
         }
     }
 
@@ -54,6 +88,8 @@ impl OAuthProvider {
                 "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
                 tenant
             ),
+            OAuthProvider::Yahoo => "https://api.login.yahoo.com/oauth2/get_token".to_string(),
+            OAuthProvider::Custom { token_url, .. } => token_url.clone(),
         }
     }
 
@@ -66,6 +102,10 @@ impl OAuthProvider {
                 "https://outlook.office.com/IMAP.AccessAsUser.All".to_string(),
                 "https://outlook.office.com/SMTP.Send".to_string(),
             ],
+            OAuthProvider::Yahoo => vec!["mail-w".to_string()],
+            OAuthProvider::Custom { scope, .. } => {
+                scope.split_whitespace().map(String::from).collect()
+            }
         }
     }
 }

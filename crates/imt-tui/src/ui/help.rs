@@ -38,7 +38,7 @@ pub fn render(f: &mut Frame, full: Rect) {
         ("r / R", "reply / reply-all"),
         ("f", "forward"),
         ("u", "toggle read / unread"),
-        ("s", "toggle flag"),
+        ("s", "★ mark / unmark important"),
         ("v", "move to folder"),
         ("d", "delete (moves to Trash)"),
         ("/", "search"),

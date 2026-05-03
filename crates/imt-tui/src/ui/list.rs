@@ -87,11 +87,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             let flagged = m.is_flagged();
             let answered = m.is_answered();
             let indicator = if flagged {
-                "*"
+                "★"
             } else if unread {
                 "\u{2022}"
             } else if answered {
-                ">"
+                "↩"
             } else {
                 " "
             };
@@ -107,7 +107,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 
             let row_style = if unread { theme::unread() } else { theme::normal() };
             let ind_style = if flagged {
-                theme::error()
+                theme::important()
             } else if unread {
                 theme::accent()
             } else {

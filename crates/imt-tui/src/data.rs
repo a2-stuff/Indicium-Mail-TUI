@@ -58,6 +58,8 @@ pub trait DataSource: Send + Sync {
     /// Current backend status string (e.g. "syncing", "idle", "connecting").
     /// Default: empty.
     fn status(&self) -> String { String::new() }
+    /// Pop the next pending toast notification, if any. Default: None.
+    fn pop_notification(&self) -> Option<String> { None }
 }
 
 #[derive(Default)]

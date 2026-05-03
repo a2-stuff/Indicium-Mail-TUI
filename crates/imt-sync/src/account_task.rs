@@ -16,7 +16,7 @@ use imt_net::backend::{EnvelopeFetch, FolderInfo, IdleEvent, MailBackend, UidRan
 use imt_net::ImapBackend;
 use imt_store::{Db, FolderRepo, MessageRepo};
 
-use crate::password::imap_provider_for;
+use crate::password::{ensure_fresh_tokens, imap_provider_for};
 use crate::snippet::make_snippet;
 
 const SNIPPET_MAX: usize = 256;
@@ -131,7 +131,10 @@ async fn run_once(ctx: &AccountTaskCtx) -> std::result::Result<(), SyncErrorReas
         account_id: ctx.account.id,
     });
 
-    let provider = imap_provider_for(ctx.account.id);
+    if let Err(e) = ensure_fresh_tokens(&ctx.account).await {
+        return Err(SyncErrorReason::Other(format!("token refresh: {e}")));
+    }
+    let provider = imap_provider_for(&ctx.account);
     let mut backend = ImapBackend::new(ctx.account.clone(), provider);
     backend
         .connect()

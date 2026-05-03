@@ -22,18 +22,22 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Move => "MOVE",
         Mode::Info => "INFO",
         Mode::FilePicker => "FILES",
+        Mode::AttachmentViewer => "ATTACHMENTS",
+        Mode::HtmlViewer => "HTML",
     };
     let hints = match app.mode {
-        Mode::Normal => "[c] compose  [Enter] open  [m] accounts  [,] settings  [/] search  [?] help  [q] quit  [i] info",
-        Mode::Compose => "Tab next  Ctrl-S send  Ctrl-D save  Esc cancel",
-        Mode::Search => "type to search  Enter jump  Esc cancel",
-        Mode::Help => "Esc / ? close",
-        Mode::Onboarding => "Tab next  Shift-Tab prev  Ctrl-S save  Esc cancel  Left/Right cycle TLS",
-        Mode::Settings => "Tab next  Space toggle  Ctrl-S save  Esc cancel",
-        Mode::Accounts => "j/k move  Enter edit  d delete  a add  Esc close",
-        Mode::Move => "j/k move  Enter select  Esc cancel",
+        Mode::Normal => "[c] compose  [Enter] open  [a] attachments  [s] important  [u] read  [m] accounts  [,] settings  [/] search  [?] help  [q] quit  [i] info",
+        Mode::Compose => "[Tab] next  [Ctrl+S] send  [Ctrl+D] save  [Esc] cancel",
+        Mode::Search => "[/] search  [Enter] jump  [Esc] cancel",
+        Mode::Help => "[Esc] close",
+        Mode::Onboarding => "[Tab] next  [Shift-Tab] prev  [Ctrl+S] save  [Esc] cancel  [←/→] cycle",
+        Mode::Settings => "[Tab] next  [Space] toggle  [←/→] cycle  [Ctrl+S] save  [Esc] cancel",
+        Mode::Accounts => "[↑↓] up/down  [e] edit  [Enter] select  [d] delete  [a] add  [Esc] cancel",
+        Mode::Move => "[↑↓] move  [Enter] select  [Esc] cancel",
         Mode::Info => "Esc / q / i  close",
-        Mode::FilePicker => "j/k navigate  Enter toggle/enter  Backspace up  a confirm  Esc cancel",
+        Mode::FilePicker => "[↑↓] move  [Space] select  [Enter] confirm  [Backspace] up  [Esc] cancel",
+        Mode::AttachmentViewer => "[↑↓] navigate  [Enter] view  [s] save  [Esc] close",
+        Mode::HtmlViewer => "[↑↓] scroll  [o / Esc] close",
     };
     let (sync_text, sync_style) = if app.is_busy() {
         (format!(" {} {} ", app.spinner_frame(), app.backend_status), theme::accent())

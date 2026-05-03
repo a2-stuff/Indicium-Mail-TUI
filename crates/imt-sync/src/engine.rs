@@ -19,7 +19,18 @@ use imt_store::{secrets, AccountRepo, Db, DraftRepo, FolderRepo, MessageRepo};
 
 use crate::account_task::{run as run_account_task, AccountTaskCtx};
 use crate::error::{Result, SyncError};
-use crate::password::{imap_provider_for, smtp_provider_for};
+use crate::password::{delete_all, imap_provider_for, smtp_provider_for, store_password};
+
+/// OAuth2 code exchange info passed to `add_account` when setting up a new
+/// OAuth2 account. The engine exchanges the authorization code for tokens and
+/// stores them in the secrets store.
+pub struct OAuthExchange {
+    pub client_id: String,
+    pub client_secret: String,
+    pub code: String,
+    pub verifier: String,
+    pub redirect_uri: String,
+}
 
 /// Handle for a running per-account worker.
 struct AccountTask {
@@ -46,11 +57,34 @@ impl SyncEngine {
         (engine, rx)
     }
 
-    /// Persist a new account, store its IMAP password in the keyring, and spawn a worker.
-    pub async fn add_account(&self, account: Account, password: String) -> Result<()> {
+    /// Persist a new account. For password accounts, stores the password in secrets.
+    /// For OAuth2 accounts, exchanges the authorization code for tokens and stores them.
+    pub async fn add_account(
+        &self,
+        account: Account,
+        password: String,
+        oauth_exchange: Option<OAuthExchange>,
+    ) -> Result<()> {
         AccountRepo::new(self.db.pool()).upsert(&account).await?;
-        secrets::store(account.id, "imap_password", &password);
-        secrets::store(account.id, "smtp_password", &password);
+        if let Some(ex) = oauth_exchange {
+            let provider = imt_net::OAuthProvider::from_imap_host(&account.imap.host)
+                .unwrap_or(imt_net::OAuthProvider::Google);
+            let client_secret = if ex.client_secret.is_empty() { None } else { Some(ex.client_secret.clone()) };
+            let flow = imt_net::OAuthFlow::new(provider, ex.client_id.clone(), client_secret.clone());
+            let verifier = imt_net::PkceVerifier(ex.verifier);
+            let tokens = flow.exchange_code(&ex.code, verifier, &ex.redirect_uri).await
+                .map_err(|e| crate::error::SyncError::Other(format!("OAuth2 code exchange: {e}")))?;
+            secrets::store(account.id, "oauth_access_token", &tokens.access_token);
+            secrets::store(account.id, "oauth_access_expiry", &tokens.expires_at.timestamp().to_string());
+            if let Some(rt) = &tokens.refresh_token {
+                secrets::store(account.id, "oauth_refresh_token", rt);
+            }
+            if let Some(cs) = &client_secret {
+                secrets::store(account.id, "oauth_client_secret", cs);
+            }
+        } else {
+            store_password(account.id, &password);
+        }
         self.spawn_task(account).await;
         Ok(())
     }
@@ -77,8 +111,7 @@ impl SyncEngine {
             task.cancel.notify_waiters();
             let _ = task.handle.await;
         }
-        secrets::delete(id, "imap_password");
-        secrets::delete(id, "smtp_password");
+        delete_all(id);
         AccountRepo::new(self.db.pool()).delete(id).await?;
         Ok(())
     }
@@ -88,7 +121,7 @@ impl SyncEngine {
         let acc = AccountRepo::new(self.db.pool()).get(account).await?;
         let folder = FolderRepo::new(self.db.pool()).get(folder_id).await?;
 
-        let provider = imap_provider_for(account);
+        let provider = imap_provider_for(&acc);
         let mut backend = ImapBackend::new(acc.clone(), provider);
         backend.connect().await?;
 
@@ -174,7 +207,7 @@ impl SyncEngine {
         let folder = FolderRepo::new(self.db.pool()).get(msg.folder_id).await?;
         let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
 
-        let provider = imap_provider_for(acc.id);
+        let provider = imap_provider_for(&acc);
         let mut backend = ImapBackend::new(acc, provider);
         backend.connect().await?;
         let body = backend.fetch_body(&folder.path, msg.uid.0).await?;
@@ -230,13 +263,13 @@ impl SyncEngine {
         };
         let raw = build_rfc822(&build)?;
 
-        let smtp = SmtpSender::new(acc.clone(), smtp_provider_for(acc.id));
+        let smtp = SmtpSender::new(acc.clone(), smtp_provider_for(&acc));
         smtp.send(&draft.from, &draft.to, &draft.cc, &draft.bcc, &raw)
             .await?;
 
         let sent_folder = find_sent_folder(&self.db, acc.id).await;
         if let Some(sent) = sent_folder {
-            let provider = imap_provider_for(acc.id);
+            let provider = imap_provider_for(&acc);
             let mut backend = ImapBackend::new(acc.clone(), provider);
             match backend.connect().await {
                 Ok(()) => {
@@ -293,7 +326,7 @@ impl SyncEngine {
         let dst_folder = folder_repo.get(dest_folder_id).await?;
         let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
 
-        let provider = imap_provider_for(acc.id);
+        let provider = imap_provider_for(&acc);
         let mut backend = ImapBackend::new(acc, provider);
         backend.connect().await?;
         backend.move_uid(&src_folder.path, msg.uid.0, &dst_folder.path).await?;
@@ -315,7 +348,7 @@ impl SyncEngine {
         let folder = FolderRepo::new(self.db.pool()).get(msg.folder_id).await?;
         let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
 
-        let provider = imap_provider_for(acc.id);
+        let provider = imap_provider_for(&acc);
         let mut backend = ImapBackend::new(acc, provider);
         backend.connect().await?;
 
@@ -343,6 +376,46 @@ impl SyncEngine {
             message_id,
             flags: updated_flags,
         });
+        Ok(())
+    }
+
+    /// Build the RFC 822 for a draft and APPEND it to the account's Drafts folder.
+    pub async fn save_draft_to_imap(&self, draft: &Draft) -> Result<()> {
+        let acc = AccountRepo::new(self.db.pool()).get(draft.account_id).await?;
+        let attachments = load_attachments(&draft.attachments).await?;
+        let build = BuildDraft {
+            from: draft.from.clone(),
+            to: draft.to.clone(),
+            cc: draft.cc.clone(),
+            bcc: draft.bcc.clone(),
+            subject: draft.subject.clone(),
+            body_text: draft.body_text.clone(),
+            attachments,
+            in_reply_to: None,
+            references: Vec::new(),
+        };
+        let raw = build_rfc822(&build)?;
+
+        let folders = FolderRepo::new(self.db.pool()).list_by_account(acc.id).await?;
+        let drafts_folder = folders.iter()
+            .find(|f| f.role == FolderRole::Drafts)
+            .or_else(|| folders.iter().find(|f| f.path.eq_ignore_ascii_case("Drafts")));
+
+        if let Some(folder) = drafts_folder {
+            let provider = imap_provider_for(&acc);
+            let mut backend = ImapBackend::new(acc.clone(), provider);
+            match backend.connect().await {
+                Ok(()) => {
+                    if let Err(e) = backend.append(&folder.path, &raw, &[Flag::Seen]).await {
+                        warn!(target: "imt-sync::engine", "append to Drafts failed: {}", e);
+                    }
+                    let _ = backend.disconnect().await;
+                    // Trigger a sync of the Drafts folder so it appears in the list.
+                    let _ = self.tx.send(SyncEvent::SyncStarted { account_id: acc.id, folder_id: Some(folder.id) });
+                }
+                Err(e) => warn!(target: "imt-sync::engine", "draft append connect failed: {}", e),
+            }
+        }
         Ok(())
     }
 

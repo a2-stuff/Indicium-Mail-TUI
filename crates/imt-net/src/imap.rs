@@ -402,6 +402,21 @@ fn fetch_to_envelope(f: &Fetch) -> Result<EnvelopeFetch> {
     })
 }
 
+fn save_attachment_temp(filename: &str, data: &[u8]) -> Option<std::path::PathBuf> {
+    let tmp = std::env::temp_dir().join("imt-attachments");
+    std::fs::create_dir_all(&tmp).ok()?;
+    let safe_name = filename
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>();
+    let name = if safe_name.is_empty() { "attachment".to_string() } else { safe_name };
+    // Use a short random suffix to avoid collisions.
+    let id = &uuid::Uuid::new_v4().to_string()[..8];
+    let path = tmp.join(format!("{}_{}", id, name));
+    std::fs::write(&path, data).ok()?;
+    Some(path)
+}
+
 fn parse_full_body(bytes: &[u8]) -> Result<MessageBody> {
     let parsed = MessageParser::default()
         .parse(bytes)
@@ -430,12 +445,15 @@ fn parse_full_body(bytes: &[u8]) -> Result<MessageBody> {
             .attachment_name()
             .map(|s| s.to_string())
             .unwrap_or_default();
-        let size = match &part.body {
-            PartType::Binary(b) => b.len() as u64,
-            PartType::InlineBinary(b) => b.len() as u64,
-            _ => 0,
+        let raw_bytes: &[u8] = match &part.body {
+            PartType::Binary(b) => b.as_ref(),
+            PartType::InlineBinary(b) => b.as_ref(),
+            _ => &[],
         };
+        let size = raw_bytes.len() as u64;
         let inline = matches!(part.body, PartType::InlineBinary(_));
+        // Save all attachments to temp so they can be viewed or saved later.
+        let temp_path = save_attachment_temp(&filename, raw_bytes);
         attachments.push(Attachment {
             filename,
             mime_type: mime,
@@ -443,6 +461,7 @@ fn parse_full_body(bytes: &[u8]) -> Result<MessageBody> {
             part_id: idx.to_string(),
             content_id: part.content_id().map(|s| s.to_string()),
             inline,
+            temp_path,
         });
     }
 

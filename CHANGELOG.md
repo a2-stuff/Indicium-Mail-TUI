@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.16] - 2026-05-03
+
+### Added
+- **Inline HTML viewer**: pressing `o` in the reader pane renders the HTML body using `html2text` and displays it in a scrollable TUI modal (`j/k` or arrows to scroll, `o`/`Esc`/`q` to close). No browser is opened or required.
+- **Full OAuth2 onboarding UI**: the Add Account modal now includes an Auth type toggle (`< Password >` / `< OAuth2 >`). Selecting OAuth2 reveals Client ID, Client Secret (optional), and Auth Code fields. Tabbing to Auth Code automatically generates a PKCE verifier + challenge and opens the provider's authorization URL via `xdg-open`. Paste the `?code=` value from the redirect URL and `Ctrl-S` to save. Token exchange and storage happen in the background.
+- **Yahoo Mail OAuth2**: full support alongside Google and Microsoft 365, using `https://api.login.yahoo.com/oauth2/` endpoints and the `mail-w` scope.
+- **Custom OAuth2 provider**: specify arbitrary `auth_url`, `token_url`, and `scope` values for any compliant OAuth2 provider.
+- **Automatic token refresh**: before each IMAP connection, `ensure_fresh_tokens()` checks the stored expiry timestamp and performs a silent refresh (using the stored refresh token) if the access token is within 60 seconds of expiring.
+- **Attachment content viewer**: text, code, and markdown files (`.md`, `.txt`, `.rs`, `.py`, `.json`, `.csv`, `.log`, etc.) are now shown inline in the attachment viewer rather than being labelled "Binary file". Viewer is opened with `Enter` or `v`; binary files still show MIME type and size.
+- **"No attachments" toast**: pressing `a` in the reader pane on a message with no attachments now shows a transient toast notification instead of silently doing nothing.
+
+### Changed
+- `o` key behaviour changed: was "open HTML in `$BROWSER`" (external), is now "open inline HTML viewer" (TUI modal). The `html_external` config key is retained for backwards compatibility but no longer has effect.
+- `a` key (attachment viewer) is now only active when focus is on the reader pane; it has no effect in the message list or sidebar.
+
 ## [0.0.15] - 2026-05-03
 
 ### Added

@@ -26,7 +26,9 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
     h[1]
 }
 
-fn check(b: bool) -> &'static str { if b { "[x]" } else { "[ ]" } }
+fn check(b: bool) -> &'static str {
+    if b { "[x]" } else { "[ ]" }
+}
 
 pub fn render(f: &mut Frame, area: Rect) {
     f.render_widget(Clear, area);
@@ -39,7 +41,7 @@ pub fn render(f: &mut Frame, area: Rect) {
 }
 
 pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
-    let modal = centered(area, 60, 16);
+    let modal = centered(area, 66, 20);
     let s = match app.settings_state.as_ref() {
         Some(s) => s,
         None => return,
@@ -54,13 +56,14 @@ pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, modal);
 
     let rows = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Min(0),
-        Constraint::Length(1),
+        Constraint::Length(2), // auto-refresh
+        Constraint::Length(2), // mark read
+        Constraint::Length(2), // html external
+        Constraint::Length(2), // browser
+        Constraint::Length(2), // show snippet
+        Constraint::Length(2), // theme
+        Constraint::Min(0),    // info
+        Constraint::Length(1), // footer
     ])
     .split(inner);
 
@@ -87,7 +90,7 @@ pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
         line(
             s.field == SettingsField::MarkReadOnOpen,
             "Mark as read on open",
-            format!("{}", check(s.draft.mark_read_on_open)),
+            check(s.draft.mark_read_on_open).to_string(),
         ),
         rows[1],
     );
@@ -95,7 +98,7 @@ pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
         line(
             s.field == SettingsField::HtmlExternal,
             "HTML mail in $BROWSER",
-            format!("{}", check(s.draft.html_external)),
+            check(s.draft.html_external).to_string(),
         ),
         rows[2],
     );
@@ -111,21 +114,39 @@ pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
         line(
             s.field == SettingsField::ShowSnippet,
             "Show preview snippet",
-            format!("{}", check(s.draft.show_snippet)),
+            check(s.draft.show_snippet).to_string(),
         ),
         rows[4],
     );
 
+    // Theme row: show name with left/right arrows as hints
+    let theme_sel = s.field == SettingsField::Theme;
+    let theme_style = if theme_sel { theme::accent() } else { theme::normal() };
+    let theme_value = if theme_sel {
+        format!("< {} >", s.draft.theme.label())
+    } else {
+        s.draft.theme.label().to_string()
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!(" {} ", mark(theme_sel)), theme::accent()),
+            Span::styled(format!("{:<26}", "Theme"), theme_style),
+            Span::styled(theme_value, theme::accent().add_modifier(Modifier::BOLD)),
+        ])),
+        rows[5],
+    );
+
     let info = Paragraph::new(vec![
+        Line::from(Span::styled("", theme::muted())),
         Line::from(Span::styled(" Messages are NEVER deleted from the server.", theme::muted())),
         Line::from(Span::styled(" Fetches use BODY.PEEK[] (no Seen flag set).", theme::muted())),
     ]);
-    f.render_widget(info, rows[5]);
+    f.render_widget(info, rows[6]);
 
     let footer = Paragraph::new(Span::styled(
-        " Tab next  Shift-Tab prev  Space/Enter toggle  Ctrl-S save  Esc cancel ",
+        " [Tab] next  [Space] toggle  [←/→] cycle  [Ctrl+S] save  [Esc] cancel ",
         theme::muted(),
     ))
     .alignment(Alignment::Center);
-    f.render_widget(footer, rows[6]);
+    f.render_widget(footer, rows[7]);
 }

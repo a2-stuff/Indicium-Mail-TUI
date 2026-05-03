@@ -47,6 +47,8 @@ impl ComposeState {
                 .border_type(ratatui::widgets::BorderType::Rounded)
                 .title("Body"),
         );
+        body.set_cursor_line_style(ratatui::style::Style::default());
+        body.set_cursor_style(ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED));
         let from_idx = accounts.iter().position(|a| a.id == draft.account_id).unwrap_or(0);
         Self { draft, field: ComposeField::To, to, cc, bcc, subject, body, from_idx }
     }
@@ -64,6 +66,20 @@ impl ComposeState {
         }
         self.draft.updated_at = chrono::Utc::now();
     }
+}
+
+fn urlencoding_simple(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            b' ' => out.push('+'),
+            _ => { out.push('%'); out.push_str(&format!("{:02X}", b)); }
+        }
+    }
+    out
 }
 
 fn addr_join(v: &[Address]) -> String {
@@ -122,8 +138,22 @@ pub struct OnboardingState {
     pub smtp_tls: Tls,
     /// Username input (defaults to email when blank).
     pub username: Input,
-    /// Password input (rendered masked).
+    /// Password input (rendered masked). Only for password auth.
     pub password: Input,
+    /// Whether OAuth2 is selected (vs password auth).
+    pub use_oauth2: bool,
+    /// OAuth2 client_id input.
+    pub client_id: Input,
+    /// OAuth2 client_secret input (optional; leave empty for PKCE-only flows).
+    pub client_secret: Input,
+    /// Authorization code the user pastes after authorizing in browser.
+    pub auth_code: Input,
+    /// PKCE verifier generated when the auth URL was first built (stable across re-renders).
+    pub oauth_pkce_verifier: Option<String>,
+    /// Generated auth URL shown to the user.
+    pub oauth_auth_url: Option<String>,
+    /// Redirect URI used in the auth URL.
+    pub oauth_redirect_uri: String,
     /// Tracks which host/port/tls fields have been manually edited so a preset
     /// won't overwrite user input.
     pub user_edited_imap: bool,
@@ -150,6 +180,13 @@ impl OnboardingState {
             smtp_tls: defaults.smtp_tls,
             username: Input::default(),
             password: Input::default(),
+            use_oauth2: false,
+            client_id: Input::default(),
+            client_secret: Input::default(),
+            auth_code: Input::default(),
+            oauth_pkce_verifier: None,
+            oauth_auth_url: None,
+            oauth_redirect_uri: "http://localhost:9876".to_string(),
             user_edited_imap: false,
             user_edited_smtp: false,
             detected_provider: None,
@@ -188,6 +225,34 @@ impl OnboardingState {
         } else {
             self.username.value().trim().to_string()
         };
+        if self.use_oauth2 {
+            let client_id = self.client_id.value().trim().to_string();
+            if client_id.is_empty() {
+                anyhow::bail!("Client ID is required for OAuth2");
+            }
+            let code = self.auth_code.value().trim().to_string();
+            if code.is_empty() {
+                anyhow::bail!("Authorization code is required - complete the browser flow first");
+            }
+            let verifier = self.oauth_pkce_verifier.clone().unwrap_or_default();
+            return Ok(NewAccountForm {
+                display_name: self.display_name.value().trim().to_string(),
+                email,
+                imap_host,
+                imap_port,
+                imap_tls: self.imap_tls,
+                smtp_host,
+                smtp_port,
+                smtp_tls: self.smtp_tls,
+                username,
+                password: String::new(),
+                oauth_client_id: client_id,
+                oauth_client_secret: self.client_secret.value().trim().to_string(),
+                oauth_code: code,
+                oauth_verifier: verifier,
+                oauth_redirect_uri: self.oauth_redirect_uri.clone(),
+            });
+        }
         Ok(NewAccountForm {
             display_name: self.display_name.value().trim().to_string(),
             email,
@@ -199,6 +264,11 @@ impl OnboardingState {
             smtp_tls: self.smtp_tls,
             username,
             password: self.password.value().to_string(),
+            oauth_client_id: String::new(),
+            oauth_client_secret: String::new(),
+            oauth_code: String::new(),
+            oauth_verifier: String::new(),
+            oauth_redirect_uri: String::new(),
         })
     }
 }
@@ -266,6 +336,10 @@ pub struct App {
     pub on_settings_changed: Option<std::sync::Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>>,
     /// File picker modal state, when open.
     pub file_picker: Option<FilePickerState>,
+    /// Attachment viewer modal state, when open.
+    pub attachment_viewer: Option<AttachmentViewerState>,
+    /// Inline HTML viewer: rendered text content and scroll offset.
+    pub html_viewer: Option<(String, u16)>,
 }
 
 /// Settings modal state.
@@ -303,8 +377,23 @@ impl Default for AccountsState {
     fn default() -> Self { Self::new() }
 }
 
-const STATUS_TTL_TICKS: u64 = 24;
+const STATUS_TTL_TICKS: u64 = 48; // ~12 seconds at 250ms tick
 const READ_DELAY_TICKS: u64 = 12; // 3 seconds at 250ms tick
+
+/// Attachment viewer modal state.
+pub enum AttachmentViewMode {
+    /// Listing attachments to pick one.
+    Listing { selected: usize },
+    /// Showing the content of a single viewable attachment.
+    Viewing { idx: usize, content: String, scroll: u16 },
+}
+
+pub struct AttachmentViewerState {
+    pub attachments: Vec<imt_core::Attachment>,
+    pub mode: AttachmentViewMode,
+    /// Download destination chosen by user (for save action).
+    pub save_dest: Option<std::path::PathBuf>,
+}
 
 /// Move-to-folder modal state.
 pub struct MoveState {
@@ -370,6 +459,45 @@ fn read_dir_entries(dir: &std::path::Path) -> Vec<FileEntry> {
         b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     entries
+}
+
+pub fn is_viewable_mime(mime: &str) -> bool {
+    mime.starts_with("text/")
+        || matches!(
+            mime,
+            "application/json"
+                | "application/xml"
+                | "application/javascript"
+                | "application/typescript"
+                | "application/x-sh"
+                | "application/x-python"
+                | "application/toml"
+                | "application/yaml"
+                | "application/x-yaml"
+                | "application/sql"
+                | "application/graphql"
+                | "application/ld+json"
+        )
+}
+
+pub fn is_viewable_by_name(filename: &str) -> bool {
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    matches!(
+        ext.as_str(),
+        "txt" | "md" | "markdown" | "log" | "csv" | "json" | "xml" | "yaml" | "yml"
+            | "toml" | "html" | "htm" | "css" | "js" | "ts" | "sh" | "bash" | "zsh"
+            | "py" | "rb" | "go" | "rs" | "c" | "h" | "cpp" | "java" | "kt" | "swift"
+            | "sql" | "graphql" | "ini" | "cfg" | "conf" | "env" | "diff" | "patch"
+            | "gitignore" | "dockerfile" | "makefile"
+    )
+}
+
+pub fn is_viewable(mime: &str, filename: &str) -> bool {
+    is_viewable_mime(mime) || is_viewable_by_name(filename)
 }
 
 fn mime_for_path(path: &std::path::Path) -> String {
@@ -474,6 +602,8 @@ impl App {
             last_auto_refresh_tick: 0,
             on_settings_changed: None,
             file_picker: None,
+            attachment_viewer: None,
+            html_viewer: None,
         };
         app.refresh_messages();
         if app.accounts.is_empty() {
@@ -493,6 +623,7 @@ impl App {
     pub fn apply_settings(&mut self, s: crate::settings::Settings) {
         self.html_external = s.html_external;
         self.browser = s.browser.clone();
+        crate::theme::apply(s.theme);
         self.settings = s;
     }
 
@@ -587,6 +718,12 @@ impl App {
     pub fn tick(&mut self) {
         self.ticks = self.ticks.wrapping_add(1);
         self.backend_status = self.data.status();
+        // Drain one notification per tick and surface it as a toast.
+        if self.status.is_empty() {
+            if let Some(notif) = self.data.pop_notification() {
+                self.set_status(notif);
+            }
+        }
         if !self.status.is_empty() && self.ticks.saturating_sub(self.status_set_tick) >= STATUS_TTL_TICKS {
             self.status.clear();
         }
@@ -782,7 +919,10 @@ impl App {
                     }
                     OnboardingField::Username => { o.username.handle_event(&evt); }
                     OnboardingField::Password => { o.password.handle_event(&evt); }
-                    OnboardingField::ImapTls | OnboardingField::SmtpTls => {}
+                    OnboardingField::ClientId => { o.client_id.handle_event(&evt); }
+                    OnboardingField::ClientSecret => { o.client_secret.handle_event(&evt); }
+                    OnboardingField::AuthCode => { o.auth_code.handle_event(&evt); }
+                    OnboardingField::ImapTls | OnboardingField::SmtpTls | OnboardingField::AuthType => {}
                 }
                 if email_changed {
                     self.maybe_apply_preset();
@@ -829,7 +969,9 @@ impl App {
     fn run_search(&mut self) {
         let q = self.search_input.value().to_string();
         self.search_results = self.data.search(&q).into_iter().collect();
-        self.status = format!("{} match(es)", self.search_results.len());
+        let n = self.search_results.len();
+        let msg = if n == 0 { "No matches".to_string() } else { format!("{} match{}", n, if n == 1 { "" } else { "es" }) };
+        self.set_status(msg);
     }
 
     /// Dispatch a high-level action.
@@ -896,7 +1038,11 @@ impl App {
             }
             KeyAction::OnboardingCycleLeft => self.cycle_tls(-1),
             KeyAction::OnboardingCycleRight => self.cycle_tls(1),
-            KeyAction::OpenHtmlInBrowser => self.open_html_in_browser(),
+            KeyAction::OpenHtmlViewer => self.open_html_viewer(),
+            KeyAction::CloseHtmlViewer => {
+                self.html_viewer = None;
+                self.mode = Mode::Normal;
+            }
             KeyAction::Refresh => {
                 let acc = self.current_account().map(|a| a.id);
                 let folder = self.current_folder().map(|f| f.id);
@@ -911,6 +1057,8 @@ impl App {
             }
             KeyAction::SaveSettings => self.save_settings(),
             KeyAction::SettingsToggle => self.toggle_setting_field(),
+            KeyAction::ThemeCycleLeft => self.cycle_theme(-1),
+            KeyAction::ThemeCycleRight => self.cycle_theme(1),
             KeyAction::OpenAccounts => self.open_accounts(),
             KeyAction::CloseAccounts => {
                 self.accounts_state = None;
@@ -931,6 +1079,10 @@ impl App {
             KeyAction::MoveSelect => self.move_select(),
             KeyAction::OpenInfo => self.mode = Mode::Info,
             KeyAction::CloseInfo => self.mode = Mode::Normal,
+            KeyAction::OpenAttachments => self.open_attachment_viewer(),
+            KeyAction::AttachmentView => self.attachment_view_open(),
+            KeyAction::AttachmentSave => self.attachment_save(),
+            KeyAction::AttachmentClose => self.attachment_close(),
         }
     }
 
@@ -999,6 +1151,10 @@ impl App {
             Some(o) => o,
             None => return,
         };
+        if o.field == OnboardingField::AuthType {
+            o.use_oauth2 = !o.use_oauth2;
+            return;
+        }
         let target = match o.field {
             OnboardingField::ImapTls => &mut o.imap_tls,
             OnboardingField::SmtpTls => &mut o.smtp_tls,
@@ -1008,12 +1164,71 @@ impl App {
         let cur = order.iter().position(|t| *t == *target).unwrap_or(0) as i32;
         let next = (cur + delta).rem_euclid(order.len() as i32) as usize;
         *target = order[next];
-        // Mark the relevant section as user-edited so presets won't overwrite.
         match o.field {
             OnboardingField::ImapTls => o.user_edited_imap = true,
             OnboardingField::SmtpTls => o.user_edited_smtp = true,
             _ => {}
         }
+    }
+
+    /// Generate the OAuth2 PKCE verifier and auth URL if not already done.
+    fn ensure_oauth_url_generated(&mut self) {
+        let o = match self.onboarding.as_mut() { Some(o) => o, None => return };
+        if !o.use_oauth2 || o.oauth_pkce_verifier.is_some() { return; }
+
+        let client_id = o.client_id.value().trim().to_string();
+        if client_id.is_empty() { return; }
+
+        // Generate PKCE verifier (32 random bytes, base64url-encoded).
+        use base64::Engine;
+        use sha2::Digest;
+        let mut raw = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut raw);
+        let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
+        let challenge = {
+            let digest = sha2::Sha256::digest(verifier.as_bytes());
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+        };
+        let state = {
+            let mut sb = [0u8; 16];
+            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut sb);
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sb)
+        };
+
+        // Detect provider from IMAP host to build the correct auth URL.
+        let imap_host = o.imap_host.value().to_string();
+        let (auth_url_base, scopes) = if imap_host.contains("gmail") || imap_host.contains("googlemail") {
+            ("https://accounts.google.com/o/oauth2/v2/auth", "https://mail.google.com/")
+        } else if imap_host.contains("outlook") || imap_host.contains("office365") {
+            ("https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+             "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send")
+        } else if imap_host.contains("yahoo") {
+            ("https://api.login.yahoo.com/oauth2/request_auth", "mail-w")
+        } else {
+            ("https://accounts.google.com/o/oauth2/v2/auth", "https://mail.google.com/")
+        };
+
+        let redirect_uri = &o.oauth_redirect_uri.clone();
+        let email = o.email.value().trim().to_string();
+        let url = format!(
+            "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent{}",
+            auth_url_base,
+            urlencoding_simple(&client_id),
+            urlencoding_simple(redirect_uri),
+            urlencoding_simple(scopes),
+            state,
+            challenge,
+            if email.is_empty() { String::new() } else { format!("&login_hint={}", urlencoding_simple(&email)) }
+        );
+
+        o.oauth_pkce_verifier = Some(verifier);
+        o.oauth_auth_url = Some(url.clone());
+
+        // Best-effort: open in default browser.
+        let url_for_spawn = url;
+        tokio::spawn(async move {
+            let _ = tokio::process::Command::new("xdg-open").arg(&url_for_spawn).spawn();
+        });
     }
 
     fn save_onboarding(&mut self) {
@@ -1096,7 +1311,95 @@ impl App {
             SettingsField::MarkReadOnOpen => state.draft.mark_read_on_open = !state.draft.mark_read_on_open,
             SettingsField::HtmlExternal => state.draft.html_external = !state.draft.html_external,
             SettingsField::ShowSnippet => state.draft.show_snippet = !state.draft.show_snippet,
+            SettingsField::Theme => self.cycle_theme(1),
             _ => {}
+        }
+    }
+
+    fn cycle_theme(&mut self, dir: i32) {
+        let Some(state) = self.settings_state.as_mut() else { return; };
+        state.draft.theme = if dir >= 0 {
+            state.draft.theme.next()
+        } else {
+            state.draft.theme.prev()
+        };
+        crate::theme::apply(state.draft.theme);
+    }
+
+    fn open_attachment_viewer(&mut self) {
+        let attachments = match self.current_body.as_ref() {
+            Some(b) if !b.attachments.is_empty() => b.attachments.clone(),
+            Some(_) => { self.set_status("No attachments"); return; }
+            None => { self.set_status("Open a message first"); return; }
+        };
+        self.attachment_viewer = Some(AttachmentViewerState {
+            attachments,
+            mode: AttachmentViewMode::Listing { selected: 0 },
+            save_dest: None,
+        });
+        self.mode = Mode::AttachmentViewer;
+    }
+
+    fn attachment_view_open(&mut self) {
+        let av = match self.attachment_viewer.as_mut() { Some(s) => s, None => return };
+        let idx = match &av.mode {
+            AttachmentViewMode::Listing { selected } => *selected,
+            AttachmentViewMode::Viewing { .. } => { av.mode = AttachmentViewMode::Listing { selected: 0 }; return; }
+        };
+        let att = match av.attachments.get(idx) { Some(a) => a.clone(), None => return };
+        let content = if let Some(path) = &att.temp_path {
+            match std::fs::read(path) {
+                Ok(bytes) => {
+                    if is_viewable(&att.mime_type, &att.filename) {
+                        match String::from_utf8(bytes.clone()) {
+                            Ok(s) => s,
+                            Err(_) => format!("[Binary content - {} bytes]\nSave with [s] to inspect externally.", bytes.len()),
+                        }
+                    } else {
+                        format!("[Binary file: {}]\nMIME type: {}\nSize: {} bytes\n\nPress [s] to save to Downloads.", att.filename, att.mime_type, att.size)
+                    }
+                }
+                Err(e) => format!("[Error reading attachment: {}]", e),
+            }
+        } else {
+            "[Attachment data not available - try re-opening the message]".to_string()
+        };
+        av.mode = AttachmentViewMode::Viewing { idx, content, scroll: 0 };
+    }
+
+    fn attachment_close(&mut self) {
+        match self.attachment_viewer.as_ref().map(|av| &av.mode) {
+            Some(AttachmentViewMode::Viewing { .. }) => {
+                if let Some(av) = self.attachment_viewer.as_mut() {
+                    av.mode = AttachmentViewMode::Listing { selected: 0 };
+                }
+            }
+            _ => {
+                self.attachment_viewer = None;
+                self.mode = Mode::Normal;
+            }
+        }
+    }
+
+    fn attachment_save(&mut self) {
+        let av = match self.attachment_viewer.as_ref() { Some(s) => s, None => return };
+        let idx = match &av.mode {
+            AttachmentViewMode::Listing { selected } => *selected,
+            AttachmentViewMode::Viewing { idx, .. } => *idx,
+        };
+        let att = match av.attachments.get(idx) { Some(a) => a.clone(), None => return };
+        let src = match &att.temp_path {
+            Some(p) => p.clone(),
+            None => { self.set_status("Attachment data not available"); return; }
+        };
+        let downloads = directories::UserDirs::new()
+            .and_then(|u| u.download_dir().map(|p| p.to_path_buf()))
+            .or_else(|| directories::UserDirs::new().map(|u| u.home_dir().join("Downloads")))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let dest = downloads.join(&att.filename);
+        match std::fs::copy(&src, &dest) {
+            Ok(_) => self.set_status(format!("Saved to {}", dest.display())),
+            Err(e) => self.set_status(format!("Save failed: {}", e)),
         }
     }
 
@@ -1148,7 +1451,7 @@ impl App {
         }
     }
 
-    fn open_html_in_browser(&mut self) {
+    fn open_html_viewer(&mut self) {
         let html = match self.current_body.as_ref().and_then(|b| b.text_html.clone()) {
             Some(h) => h,
             None => {
@@ -1156,29 +1459,12 @@ impl App {
                 return;
             }
         };
-        let path = std::env::temp_dir().join(format!("imt-{}.html", uuid::Uuid::new_v4()));
-        if let Err(e) = std::fs::write(&path, html.as_bytes()) {
-            self.set_status(format!("Failed to write temp file: {e}"));
-            return;
-        }
-        let cmd = if !self.browser.is_empty() {
-            self.browser.clone()
-        } else if std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            "xdg-open".to_string()
-        } else {
-            self.set_status(format!("No display; HTML saved to {}", path.display()));
-            return;
+        let content = match html2text::from_read(html.as_bytes(), 120) {
+            Ok(rendered) => rendered,
+            Err(_) => html,
         };
-        let path_str = path.display().to_string();
-        let cmd_for_log = cmd.clone();
-        let path_for_log = path.clone();
-        tokio::spawn(async move {
-            match tokio::process::Command::new(&cmd_for_log).arg(&path_for_log).spawn() {
-                Ok(_) => tracing::info!("opened HTML in {}", cmd_for_log),
-                Err(e) => tracing::warn!("failed to spawn {}: {}", cmd_for_log, e),
-            }
-        });
-        self.set_status(format!("Opened {} (saved at {})", cmd, path_str));
+        self.html_viewer = Some((content, 0));
+        self.mode = Mode::HtmlViewer;
     }
 
     fn focus_next(&mut self) {
@@ -1190,7 +1476,13 @@ impl App {
         }
         if self.mode == Mode::Onboarding {
             if let Some(o) = self.onboarding.as_mut() {
-                o.field = o.field.next();
+                let oauth2 = o.use_oauth2;
+                // Generate auth URL when the user first reaches AuthCode.
+                let next = o.field.next(oauth2);
+                if next == OnboardingField::AuthCode {
+                    self.ensure_oauth_url_generated();
+                }
+                if let Some(o) = self.onboarding.as_mut() { o.field = next; }
             }
             return;
         }
@@ -1216,7 +1508,8 @@ impl App {
         }
         if self.mode == Mode::Onboarding {
             if let Some(o) = self.onboarding.as_mut() {
-                o.field = o.field.prev();
+                let oauth2 = o.use_oauth2;
+                o.field = o.field.prev(oauth2);
             }
             return;
         }
@@ -1234,6 +1527,21 @@ impl App {
     }
 
     fn move_up(&mut self) {
+        if self.mode == Mode::HtmlViewer {
+            if let Some((_, scroll)) = self.html_viewer.as_mut() {
+                *scroll = scroll.saturating_sub(1);
+            }
+            return;
+        }
+        if self.mode == Mode::AttachmentViewer {
+            if let Some(av) = self.attachment_viewer.as_mut() {
+                match &mut av.mode {
+                    AttachmentViewMode::Listing { selected } => { if *selected > 0 { *selected -= 1; } }
+                    AttachmentViewMode::Viewing { scroll, .. } => { *scroll = scroll.saturating_sub(1); }
+                }
+            }
+            return;
+        }
         if self.mode == Mode::FilePicker {
             if let Some(s) = self.file_picker.as_mut() {
                 if s.selected_idx > 0 { s.selected_idx -= 1; }
@@ -1268,6 +1576,23 @@ impl App {
     }
 
     fn move_down(&mut self) {
+        if self.mode == Mode::HtmlViewer {
+            if let Some((_, scroll)) = self.html_viewer.as_mut() {
+                *scroll = scroll.saturating_add(1);
+            }
+            return;
+        }
+        if self.mode == Mode::AttachmentViewer {
+            if let Some(av) = self.attachment_viewer.as_mut() {
+                match &mut av.mode {
+                    AttachmentViewMode::Listing { selected } => {
+                        if *selected + 1 < av.attachments.len() { *selected += 1; }
+                    }
+                    AttachmentViewMode::Viewing { scroll, .. } => { *scroll = scroll.saturating_add(1); }
+                }
+            }
+            return;
+        }
         if self.mode == Mode::FilePicker {
             if let Some(s) = self.file_picker.as_mut() {
                 if s.selected_idx + 1 < s.entries.len() { s.selected_idx += 1; }
@@ -1458,8 +1783,10 @@ impl App {
     fn toggle_flag(&mut self) {
         if let Some(m) = self.current_message() {
             let id = m.id;
+            let was_flagged = m.is_flagged();
             self.data.toggle_flag(id);
             self.refresh_messages();
+            self.set_status(if was_flagged { "Unmarked as important" } else { "★ Marked as important" });
         }
     }
 
