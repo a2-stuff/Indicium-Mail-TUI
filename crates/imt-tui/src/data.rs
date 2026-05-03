@@ -34,6 +34,8 @@ pub trait DataSource: Send + Sync {
     fn add_account(&self, _form: NewAccountForm) -> anyhow::Result<AccountId> {
         anyhow::bail!("add_account not supported by this data source")
     }
+    /// Trigger a sync. `None` arguments mean "all". Default: no-op.
+    fn refresh(&self, _account: Option<AccountId>, _folder: Option<FolderId>) {}
 }
 
 #[derive(Default)]

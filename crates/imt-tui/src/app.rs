@@ -253,6 +253,11 @@ impl App {
             })
             .collect();
 
+        let initial_folder_idx = accounts
+            .first()
+            .and_then(|a| a.folders.iter().position(|f| f.role == imt_core::FolderRole::Inbox))
+            .unwrap_or(0);
+
         let mut app = Self {
             data,
             focus: Focus::MessageList,
@@ -260,7 +265,7 @@ impl App {
             should_quit: false,
             accounts,
             sidebar_account_idx: 0,
-            sidebar_folder_idx: 0,
+            sidebar_folder_idx: initial_folder_idx,
             messages: Vec::new(),
             message_idx: 0,
             current_body: None,
@@ -333,8 +338,73 @@ impl App {
         self.reader_scroll = 0;
     }
 
-    /// Periodic tick (every 250ms) - update relative time labels, etc.
-    pub fn tick(&mut self) {}
+    /// Periodic tick (every 250ms). Pulls fresh state from the data source so
+    /// background sync events become visible without manual interaction.
+    pub fn tick(&mut self) {
+        let new_accounts = self.data.accounts();
+        let accounts_changed = new_accounts.len() != self.accounts.len()
+            || new_accounts
+                .iter()
+                .zip(self.accounts.iter())
+                .any(|(a, av)| a.id != av.account.id);
+        if accounts_changed {
+            let prev_expanded: std::collections::HashMap<imt_core::AccountId, bool> = self
+                .accounts
+                .iter()
+                .map(|av| (av.account.id, av.expanded))
+                .collect();
+            self.accounts = new_accounts
+                .into_iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    let folders = self.data.folders(a.id);
+                    let expanded = prev_expanded.get(&a.id).copied().unwrap_or(i == 0);
+                    AccountView { account: a, folders, expanded }
+                })
+                .collect();
+        } else {
+            for av in self.accounts.iter_mut() {
+                av.folders = self.data.folders(av.account.id);
+            }
+        }
+
+        if self.sidebar_account_idx >= self.accounts.len() {
+            self.sidebar_account_idx = self.accounts.len().saturating_sub(1);
+        }
+        if let Some(a) = self.accounts.get(self.sidebar_account_idx) {
+            if self.sidebar_folder_idx >= a.folders.len() {
+                self.sidebar_folder_idx = a.folders.len().saturating_sub(1);
+            }
+        }
+
+        if let Some(folder_id) = self.current_folder().map(|f| f.id) {
+            let new_msgs = self.data.messages(folder_id);
+            let len_changed = new_msgs.len() != self.messages.len();
+            let head_changed = !len_changed
+                && new_msgs.first().map(|m| m.id) != self.messages.first().map(|m| m.id);
+            let flags_changed = !len_changed
+                && !head_changed
+                && new_msgs
+                    .iter()
+                    .zip(self.messages.iter())
+                    .any(|(a, b)| a.flags != b.flags);
+            if len_changed || head_changed || flags_changed {
+                let selected_id = self.current_message().map(|m| m.id);
+                self.messages = new_msgs;
+                self.message_idx = selected_id
+                    .and_then(|id| self.messages.iter().position(|m| m.id == id))
+                    .unwrap_or(0);
+            }
+        }
+
+        if self.current_body.is_none() {
+            if let Some(m) = self.current_message() {
+                if let Some(body) = self.data.message_body(m.id).or_else(|| m.body.clone()) {
+                    self.current_body = Some(body);
+                }
+            }
+        }
+    }
 
     /// Handle a raw key event.
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -510,6 +580,12 @@ impl App {
             KeyAction::OnboardingCycleLeft => self.cycle_tls(-1),
             KeyAction::OnboardingCycleRight => self.cycle_tls(1),
             KeyAction::OpenHtmlInBrowser => self.open_html_in_browser(),
+            KeyAction::Refresh => {
+                let acc = self.current_account().map(|a| a.id);
+                let folder = self.current_folder().map(|f| f.id);
+                self.data.refresh(acc, folder);
+                self.status = "refreshing...".into();
+            }
         }
     }
 

@@ -197,11 +197,11 @@ async fn run_tui(mock: bool, db_path: &std::path::Path, cfg_path: Option<PathBuf
     let snap_for_cmds = snapshot.clone();
     let engine_for_cmds = engine.clone();
     let db_for_cmds = db.clone();
-    tokio::spawn(async move {
-        command_worker(engine_for_cmds, db_for_cmds, snap_for_cmds, cmd_rx).await;
-    });
-
     let data = SyncDataSource::new(snapshot, cmd_tx);
+    let inflight_for_cmds = data.in_flight_bodies.clone();
+    tokio::spawn(async move {
+        command_worker(engine_for_cmds, db_for_cmds, snap_for_cmds, inflight_for_cmds, cmd_rx).await;
+    });
     let result = imt_tui::run(data).await;
     let _ = engine.shutdown().await;
     result

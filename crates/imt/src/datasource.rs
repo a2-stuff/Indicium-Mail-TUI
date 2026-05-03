@@ -1,6 +1,7 @@
 //! Adapter that exposes the live `SyncEngine` + `Snapshot` as the TUI's `DataSource`.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use imt_core::{
@@ -22,6 +23,9 @@ pub enum Command {
     Send(Draft),
     FetchBody(MessageId),
     SetFlag { message_id: MessageId, flag: Flag, add: bool },
+    SyncFolder { account: AccountId, folder: FolderId },
+    SyncAccount { account: AccountId },
+    SyncAll,
 }
 
 /// Sync-trait adapter the TUI talks to. All write methods enqueue a `Command`.
@@ -29,11 +33,16 @@ pub enum Command {
 pub struct SyncDataSource {
     pub snapshot: Snapshot,
     pub commands: mpsc::UnboundedSender<Command>,
+    pub in_flight_bodies: Arc<Mutex<HashSet<MessageId>>>,
 }
 
 impl SyncDataSource {
     pub fn new(snapshot: Snapshot, commands: mpsc::UnboundedSender<Command>) -> Self {
-        Self { snapshot, commands }
+        Self {
+            snapshot,
+            commands,
+            in_flight_bodies: Arc::new(Mutex::new(HashSet::new())),
+        }
     }
 }
 
@@ -59,7 +68,10 @@ impl DataSource for SyncDataSource {
         if cached.is_some() {
             return cached;
         }
-        let _ = self.commands.send(Command::FetchBody(message));
+        let mut inflight = self.in_flight_bodies.lock().unwrap();
+        if inflight.insert(message) {
+            let _ = self.commands.send(Command::FetchBody(message));
+        }
         None
     }
 
@@ -123,6 +135,15 @@ impl DataSource for SyncDataSource {
             .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
         Ok(id)
     }
+
+    fn refresh(&self, account: Option<AccountId>, folder: Option<FolderId>) {
+        let cmd = match (account, folder) {
+            (Some(a), Some(f)) => Command::SyncFolder { account: a, folder: f },
+            (Some(a), None) => Command::SyncAccount { account: a },
+            _ => Command::SyncAll,
+        };
+        let _ = self.commands.send(cmd);
+    }
 }
 
 /// Handle commands by dispatching to the `SyncEngine`. Runs until the
@@ -131,6 +152,7 @@ pub async fn command_worker(
     engine: Arc<SyncEngine>,
     db: Arc<Db>,
     snapshot: Snapshot,
+    in_flight_bodies: Arc<Mutex<HashSet<MessageId>>>,
     mut rx: mpsc::UnboundedReceiver<Command>,
 ) {
     while let Some(cmd) = rx.recv().await {
@@ -158,6 +180,36 @@ pub async fn command_worker(
                 match engine.fetch_body(mid).await {
                     Ok(body) => snapshot.write(|s| { s.bodies.insert(mid, body); }),
                     Err(e) => snapshot.set_status(format!("fetch body failed: {}", e)),
+                }
+                in_flight_bodies.lock().unwrap().remove(&mid);
+            }
+            Command::SyncFolder { account, folder } => {
+                if let Err(e) = engine.sync_folder(account, folder).await {
+                    snapshot.set_status(format!("sync failed: {}", e));
+                }
+            }
+            Command::SyncAccount { account } => {
+                let folder_ids = snapshot.read(|s| {
+                    s.folders_by_account.get(&account)
+                        .map(|fs| fs.iter().map(|f| f.id).collect::<Vec<_>>())
+                        .unwrap_or_default()
+                });
+                for fid in folder_ids {
+                    if let Err(e) = engine.sync_folder(account, fid).await {
+                        snapshot.set_status(format!("sync failed: {}", e));
+                    }
+                }
+            }
+            Command::SyncAll => {
+                let pairs = snapshot.read(|s| {
+                    s.folders_by_account.iter()
+                        .flat_map(|(aid, fs)| fs.iter().map(move |f| (*aid, f.id)))
+                        .collect::<Vec<_>>()
+                });
+                for (aid, fid) in pairs {
+                    if let Err(e) = engine.sync_folder(aid, fid).await {
+                        snapshot.set_status(format!("sync failed: {}", e));
+                    }
                 }
             }
             Command::SetFlag { message_id, flag, add } => {

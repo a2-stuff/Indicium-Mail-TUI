@@ -143,6 +143,7 @@ pub enum KeyAction {
     OnboardingCycleLeft,
     OnboardingCycleRight,
     OpenHtmlInBrowser,
+    Refresh,
 }
 
 /// Translate a key event to a `KeyAction` in normal mode (compose mode handled separately).
@@ -186,6 +187,8 @@ fn map_normal(focus: Focus, key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('{') => Some(KeyAction::PrevAccount),
         KeyCode::Char('A') if focus == Focus::Sidebar => Some(KeyAction::OpenOnboarding),
         KeyCode::Char('o') => Some(KeyAction::OpenHtmlInBrowser),
+        KeyCode::F(5) => Some(KeyAction::Refresh),
+        KeyCode::Char('r') if ctrl => Some(KeyAction::Refresh),
         _ => None,
     }
 }
