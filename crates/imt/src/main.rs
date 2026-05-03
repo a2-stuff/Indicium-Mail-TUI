@@ -159,7 +159,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run_tui(mock: bool, db_path: &std::path::Path, cfg_path: Option<PathBuf>) -> anyhow::Result<()> {
     let dirs = project_dirs()?;
     let cfg_path = cfg_path.unwrap_or_else(|| dirs.config_dir().join("config.toml"));
-    let mut cfg = config::Config::load_or_default(&cfg_path)?;
+    let cfg = config::Config::load_or_default(&cfg_path)?;
 
     if mock {
         tracing::info!("starting TUI with in-memory mock");

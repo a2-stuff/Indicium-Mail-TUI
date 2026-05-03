@@ -2,7 +2,7 @@
 
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::Modifier;
-use ratatui::text::{Line, Span};
+use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 

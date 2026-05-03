@@ -164,7 +164,7 @@ impl DataSource for SyncDataSource {
         let trash_id = self.snapshot.read(|s| {
             s.messages_by_folder.iter()
                 .find(|(_, msgs)| msgs.iter().any(|m| m.id == message))
-                .and_then(|(fid, msgs)| msgs.iter().find(|m| m.id == message).map(|m| m.account_id))
+                .and_then(|(_fid, msgs)| msgs.iter().find(|m| m.id == message).map(|m| m.account_id))
                 .and_then(|aid| s.folders_by_account.get(&aid))
                 .and_then(|fs| fs.iter().find(|f| f.role == imt_core::FolderRole::Trash).map(|f| f.id))
         });
