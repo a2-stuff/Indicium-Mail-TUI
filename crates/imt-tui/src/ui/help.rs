@@ -37,12 +37,13 @@ pub fn render(f: &mut Frame, full: Rect) {
         ("c", "compose"),
         ("r / R", "reply / reply-all"),
         ("f", "forward"),
+        ("u", "toggle read / unread"),
         ("s", "toggle flag"),
-        ("m", "mark read"),
-        ("d", "delete"),
+        ("v", "move to folder"),
+        ("d", "delete (moves to Trash)"),
         ("/", "search"),
-        ("A", "add account (sidebar focus)"),
         ("o", "open HTML body in browser"),
+        ("A", "add account (sidebar focus)"),
     ]));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled("Compose", theme::accent())));
@@ -56,6 +57,9 @@ pub fn render(f: &mut Frame, full: Rect) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled("App", theme::accent())));
     lines.extend(group(&[
+        ("m", "account manager"),
+        (",", "settings"),
+        ("Ctrl-R / Ctrl-L", "refresh"),
         ("?", "toggle help"),
         ("q", "quit"),
     ]));

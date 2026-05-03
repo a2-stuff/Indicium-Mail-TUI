@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.11] - 2026-05-03
+
+### Fixed
+- **Ctrl-R refresh was dispatching Reply** instead of refreshing. The `KeyCode::Char('r') if !shift` arm matched first because Ctrl+R has no shift modifier. The ctrl guards now come before the plain letter guards in the match.
+- `m` key now opens Account Manager (was `M`/Shift-M). The old `m` mark-read binding is removed; use `u` to toggle read/unread.
+
+### Changed
+- Status bar footer reformatted: `[c] compose | [Enter] open | [m] accounts | [,] settings | [/] search | [?] help | [q] quit`
+- Help overlay updated: `m` entry corrected to "account manager", `u` and `v` entries added, refresh and settings listed in the App section.
+
 ## [0.0.10] - 2026-05-03
 
 ### Fixed
