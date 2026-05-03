@@ -33,17 +33,28 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         if av.expanded {
             for (fi, folder) in av.folders.iter().enumerate() {
                 let selected = is_acc_sel && fi == app.sidebar_folder_idx;
+                let live_unread = app
+                    .data
+                    .messages(folder.id)
+                    .iter()
+                    .filter(|m| m.is_unread())
+                    .count() as u32;
+                let unread = if live_unread > 0 || folder.message_count == 0 {
+                    live_unread
+                } else {
+                    folder.unread_count
+                };
                 let mut spans: Vec<Span> = Vec::new();
                 spans.push(Span::raw("    "));
-                let label_style = if folder.unread_count > 0 {
+                let label_style = if unread > 0 {
                     theme::unread()
                 } else {
                     theme::normal()
                 };
                 spans.push(Span::styled(folder.name.clone(), label_style));
-                if folder.unread_count > 0 {
+                if unread > 0 {
                     spans.push(Span::raw(" "));
-                    spans.push(Span::styled(format!("({})", folder.unread_count), theme::accent()));
+                    spans.push(Span::styled(format!("({})", unread), theme::accent()));
                 }
                 let mut line = Line::from(spans);
                 if selected {

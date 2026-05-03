@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.10] - 2026-05-03
+
+### Fixed
+- Sidebar unread badge now reflects local read/unread changes immediately by counting unread messages in the cached list, not just the stored `folder.unread_count` (which only updates after a server-side sync).
+- Mouse capture no longer enabled; native terminal copy-paste works as expected. The app does not use mouse input anyway.
+- `o` (open HTML in browser) detects the absence of a display (no `$DISPLAY` / `$WAYLAND_DISPLAY`) and prints the saved temp file path instead of failing silently. Errors are surfaced to the status bar.
+
+### Changed
+- Status bar footer in normal mode trimmed: `Enter open  c compose  Ctrl-R refresh  M accounts  , settings  / search  ? help  q quit`. The full keymap is in the `?` overlay.
+
 ## [0.0.9] - 2026-05-03
 
 ### Added

@@ -963,21 +963,33 @@ impl App {
         let html = match self.current_body.as_ref().and_then(|b| b.text_html.clone()) {
             Some(h) => h,
             None => {
-                self.status = "No HTML body".into();
+                self.set_status("No HTML body in this message");
                 return;
             }
         };
         let path = std::env::temp_dir().join(format!("imt-{}.html", uuid::Uuid::new_v4()));
         if let Err(e) = std::fs::write(&path, html.as_bytes()) {
-            self.status = format!("Failed to open: {e}");
+            self.set_status(format!("Failed to write temp file: {e}"));
             return;
         }
-        let cmd = if self.browser.is_empty() { "xdg-open".to_string() } else { self.browser.clone() };
-        let path_buf = path.clone();
+        let cmd = if !self.browser.is_empty() {
+            self.browser.clone()
+        } else if std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            "xdg-open".to_string()
+        } else {
+            self.set_status(format!("No display; HTML saved to {}", path.display()));
+            return;
+        };
+        let path_str = path.display().to_string();
+        let cmd_for_log = cmd.clone();
+        let path_for_log = path.clone();
         tokio::spawn(async move {
-            let _ = tokio::process::Command::new(&cmd).arg(path_buf).spawn();
+            match tokio::process::Command::new(&cmd_for_log).arg(&path_for_log).spawn() {
+                Ok(_) => tracing::info!("opened HTML in {}", cmd_for_log),
+                Err(e) => tracing::warn!("failed to spawn {}: {}", cmd_for_log, e),
+            }
         });
-        self.status = "Opened in browser".into();
+        self.set_status(format!("Opened {} (saved at {})", cmd, path_str));
     }
 
     fn focus_next(&mut self) {

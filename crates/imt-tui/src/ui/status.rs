@@ -22,7 +22,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Move => "MOVE",
     };
     let hints = match app.mode {
-        Mode::Normal => "j/k move  Enter open  c compose  r reply  R reply-all  f forward  u read/unread  v move  d delete  Ctrl-R refresh  M accounts  , settings  / search  ? help  q quit",
+        Mode::Normal => "Enter open  c compose  Ctrl-R refresh  M accounts  , settings  / search  ? help  q quit",
         Mode::Compose => "Tab next  Ctrl-S send  Ctrl-D save  Esc cancel",
         Mode::Search => "type to search  Enter jump  Esc cancel",
         Mode::Help => "Esc / ? close",
