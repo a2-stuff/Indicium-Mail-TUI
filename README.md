@@ -4,7 +4,7 @@
   <img src="Indicium-Mail-TUI.gif" alt="Indicium Mail TUI demo" />
 </p>
 
-A fast, modern terminal email client written in Rust.
+A keyboard-driven terminal email client built in Rust. Reads and sends mail over standard IMAP/SMTP with real push delivery via RFC 2177 IDLE, stores everything locally in SQLite, and never opens a browser - HTML renders inline, OAuth2 flows run inside the TUI itself.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.80+-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -17,16 +17,33 @@ A fast, modern terminal email client written in Rust.
 
 ## Features
 
-- **Three-pane UI** - sidebar (accounts/folders) + message list + reader
-- **IMAP** with real RFC 2177 IDLE push (auto-detects new mail without polling)
-- **SMTP** send via STARTTLS or implicit TLS
-- **OAuth2** (PKCE) for Gmail, Microsoft 365, Yahoo, and custom providers - full onboarding UI included
-- **SQLite** local cache with WAL and FTS5 full-text search
-- **Onboarding modal** with provider presets (gmail, outlook, fastmail, yahoo, icloud)
-- **Compose / reply / reply-all / forward** with quoted bodies and proper threading headers
-- **HTML mail** rendered inline via `html2text` (no browser required)
-- **Attachment viewer** - text, code, and markdown files shown inline; binary downloads saved to disk
-- **Single static binary** - no runtime dependencies
+**Mail**
+- Real RFC 2177 IDLE push - new mail appears instantly without polling
+- IMAP implicit TLS, STARTTLS, and plain; SMTP with the same three modes
+- Compose, reply, reply-all, and forward with quoted bodies and correct threading headers (`In-Reply-To`, `References`)
+- Full-text search across all cached messages via SQLite FTS5
+- Move to folder, delete to Trash, flag, mark read/unread
+
+**Reading**
+- Three-pane layout: account/folder sidebar, message list, reader
+- HTML bodies rendered inline via `html2text` - no browser needed
+- Attachment viewer: text, code, and markdown shown inline; binary files identified by MIME type and saved to disk
+- Auto mark-read after a configurable dwell time (default 3 seconds)
+- Preview snippets in the message list (optional)
+
+**Account setup**
+- Interactive onboarding modal with provider auto-fill for Gmail, Outlook, Fastmail, Yahoo, and iCloud
+- Password auth or full OAuth2 (PKCE) - switch auth type inside the modal with `←/→`
+- OAuth2 for Gmail, Microsoft 365, Yahoo Mail, and any custom provider; auth URL opens automatically, token exchange and refresh happen in the background
+- Multi-account support with an account manager (`m`)
+
+**Other**
+- SQLite local cache with WAL mode - fast reads, no corruption on crash
+- Configurable auto-refresh interval; IDLE push always active
+- Toast notifications for async events (sync errors, account added, mail moved)
+- File picker for attaching files in compose (`Ctrl-A`)
+- Theming support
+- Single static binary, no runtime dependencies
 
 ## Install
 
