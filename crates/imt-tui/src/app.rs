@@ -264,6 +264,8 @@ pub struct App {
     pub last_auto_refresh_tick: u64,
     /// Hook for the binary to persist settings; called whenever settings change.
     pub on_settings_changed: Option<std::sync::Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>>,
+    /// File picker modal state, when open.
+    pub file_picker: Option<FilePickerState>,
 }
 
 /// Settings modal state.
@@ -309,6 +311,94 @@ pub struct MoveState {
     pub message_id: imt_core::MessageId,
     pub folders: Vec<imt_core::Folder>,
     pub selected: usize,
+}
+
+/// A single filesystem entry shown in the file picker.
+pub struct FileEntry {
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub is_dir: bool,
+    pub size: u64,
+}
+
+/// State for the file picker modal.
+pub struct FilePickerState {
+    pub current_dir: std::path::PathBuf,
+    pub entries: Vec<FileEntry>,
+    pub selected_idx: usize,
+    pub picked: Vec<std::path::PathBuf>,
+}
+
+impl FilePickerState {
+    pub fn new() -> Self {
+        let home = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        let mut s = Self {
+            current_dir: home,
+            entries: Vec::new(),
+            selected_idx: 0,
+            picked: Vec::new(),
+        };
+        s.reload();
+        s
+    }
+
+    pub fn reload(&mut self) {
+        self.entries = read_dir_entries(&self.current_dir);
+        self.selected_idx = 0;
+    }
+}
+
+fn read_dir_entries(dir: &std::path::Path) -> Vec<FileEntry> {
+    let mut entries = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            let meta = entry.metadata().ok();
+            let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let name = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if name.starts_with('.') { continue; }
+            entries.push(FileEntry { name, path, is_dir, size });
+        }
+    }
+    entries.sort_by(|a, b| {
+        b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    entries
+}
+
+fn mime_for_path(path: &std::path::Path) -> String {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "txt" | "log" => "text/plain",
+        "html" | "htm" => "text/html",
+        "csv" => "text/csv",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" | "tgz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "mp3" => "audio/mpeg",
+        "mp4" => "video/mp4",
+        "mkv" => "video/x-matroska",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => "application/octet-stream",
+    }.to_string()
 }
 
 impl App {
@@ -383,6 +473,7 @@ impl App {
             onboarding_edit_id: None,
             last_auto_refresh_tick: 0,
             on_settings_changed: None,
+            file_picker: None,
         };
         app.refresh_messages();
         if app.accounts.is_empty() {
@@ -574,6 +665,12 @@ impl App {
 
     /// Handle a raw key event.
     pub fn handle_key(&mut self, key: KeyEvent) {
+        if self.mode == Mode::FilePicker {
+            if let Some(action) = map_key(self.focus, self.mode, key) {
+                self.dispatch(action);
+            }
+            return;
+        }
         if self.mode == Mode::Compose {
             if let Some(action) = map_key(self.focus, self.mode, key) {
                 self.dispatch(action);
@@ -586,12 +683,24 @@ impl App {
                     ComposeField::Bcc => { c.bcc.handle_event(&crossterm::event::Event::Key(key)); }
                     ComposeField::Subject => { c.subject.handle_event(&crossterm::event::Event::Key(key)); }
                     ComposeField::Body => { c.body.input(key); }
-                    ComposeField::From | ComposeField::Attachments => {
+                    ComposeField::From => {
                         if matches!(key.code, crossterm::event::KeyCode::Left) && c.field == ComposeField::From {
                             if c.from_idx > 0 { c.from_idx -= 1; }
                         }
                         if matches!(key.code, crossterm::event::KeyCode::Right) && c.field == ComposeField::From {
                             if c.from_idx + 1 < self.accounts.len() { c.from_idx += 1; }
+                        }
+                    }
+                    ComposeField::Attachments => {
+                        match key.code {
+                            crossterm::event::KeyCode::Delete | crossterm::event::KeyCode::Backspace => {
+                                if let Some(c) = self.compose.as_mut() {
+                                    if !c.draft.attachments.is_empty() {
+                                        c.draft.attachments.pop();
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -764,7 +873,19 @@ impl App {
                 self.clear_status();
             }
             KeyAction::AddAttachment => {
-                self.status = "Attachments not implemented in mock".into();
+                let mut picker = FilePickerState::new();
+                if let Some(c) = self.compose.as_ref() {
+                    picker.picked = c.draft.attachments.iter().map(|a| a.path.clone()).collect();
+                }
+                self.file_picker = Some(picker);
+                self.mode = Mode::FilePicker;
+            }
+            KeyAction::FilePickerToggle => self.file_picker_toggle(),
+            KeyAction::FilePickerParent => self.file_picker_parent(),
+            KeyAction::FilePickerConfirm => self.file_picker_confirm(),
+            KeyAction::FilePickerCancel => {
+                self.file_picker = None;
+                self.mode = Mode::Compose;
             }
             KeyAction::OpenOnboarding => self.open_onboarding(),
             KeyAction::SaveOnboarding => self.save_onboarding(),
@@ -810,6 +931,66 @@ impl App {
             KeyAction::MoveSelect => self.move_select(),
             KeyAction::OpenInfo => self.mode = Mode::Info,
             KeyAction::CloseInfo => self.mode = Mode::Normal,
+        }
+    }
+
+    fn file_picker_toggle(&mut self) {
+        let s = match self.file_picker.as_mut() { Some(s) => s, None => return };
+        let idx = s.selected_idx;
+        if let Some(entry) = s.entries.get(idx) {
+            if entry.is_dir {
+                let new_dir = entry.path.clone();
+                s.current_dir = new_dir;
+                s.reload();
+            } else {
+                let path = entry.path.clone();
+                if let Some(pos) = s.picked.iter().position(|p| p == &path) {
+                    s.picked.remove(pos);
+                } else {
+                    s.picked.push(path);
+                }
+            }
+        }
+    }
+
+    fn file_picker_parent(&mut self) {
+        let s = match self.file_picker.as_mut() { Some(s) => s, None => return };
+        if let Some(parent) = s.current_dir.parent().map(|p| p.to_path_buf()) {
+            s.current_dir = parent;
+            s.reload();
+        }
+    }
+
+    fn file_picker_confirm(&mut self) {
+        let picked = match self.file_picker.take() {
+            Some(s) => s.picked,
+            None => return,
+        };
+        self.mode = Mode::Compose;
+        if let Some(compose) = self.compose.as_mut() {
+            compose.draft.attachments.retain(|a| picked.contains(&a.path));
+            for path in &picked {
+                if compose.draft.attachments.iter().any(|a| &a.path == path) {
+                    continue;
+                }
+                let filename = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("file")
+                    .to_string();
+                let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                let mime_type = mime_for_path(path);
+                compose.draft.attachments.push(imt_core::draft::DraftAttachment {
+                    filename,
+                    mime_type,
+                    path: path.clone(),
+                    size,
+                });
+            }
+        }
+        if picked.is_empty() {
+            self.set_status("No attachments selected");
+        } else {
+            self.set_status(format!("{} attachment(s) added", picked.len()));
         }
     }
 
@@ -1053,6 +1234,12 @@ impl App {
     }
 
     fn move_up(&mut self) {
+        if self.mode == Mode::FilePicker {
+            if let Some(s) = self.file_picker.as_mut() {
+                if s.selected_idx > 0 { s.selected_idx -= 1; }
+            }
+            return;
+        }
         if self.mode == Mode::Move {
             if let Some(s) = self.move_state.as_mut() {
                 if s.selected > 0 { s.selected -= 1; }
@@ -1081,6 +1268,12 @@ impl App {
     }
 
     fn move_down(&mut self) {
+        if self.mode == Mode::FilePicker {
+            if let Some(s) = self.file_picker.as_mut() {
+                if s.selected_idx + 1 < s.entries.len() { s.selected_idx += 1; }
+            }
+            return;
+        }
         if self.mode == Mode::Move {
             if let Some(s) = self.move_state.as_mut() {
                 if s.selected + 1 < s.folders.len() { s.selected += 1; }

@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod compose;
+pub mod file_picker;
 pub mod help;
 pub mod info;
 pub mod layout;
@@ -50,6 +51,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if app.mode == Mode::Info {
         info::render(f, f.area());
+    }
+    if app.mode == Mode::FilePicker {
+        file_picker::render(f, f.area(), app);
     }
     // Toast always renders last so it floats above all other content.
     toast::render(f, f.area(), app);

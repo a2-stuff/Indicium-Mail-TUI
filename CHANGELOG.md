@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.15] - 2026-05-03
+
+### Added
+- **File browser for attachments**: pressing `Ctrl-A` in the compose modal (when on any field) opens a full file picker. Navigate with `j/k`, `Enter` to toggle selection or enter a directory, `Backspace` to go up, `a` to confirm all selected files, `Esc` to cancel. Multiple files can be selected simultaneously; each shows `[x]` when picked. Directories show bold with `[d]`. File sizes are displayed.
+- **Remove attachments**: with the Attachments field focused in compose, press `Backspace`/`Delete` to remove the last attachment one at a time.
+- 25+ MIME type mappings (PDF, images, Office, archives, audio/video, plain text, JSON/XML, etc.).
+
+### Changed
+- Attachment row in compose now shows count and filenames when attachments are present, with inline remove hint.
+
 ## [0.0.14] - 2026-05-03
 
 ### Added

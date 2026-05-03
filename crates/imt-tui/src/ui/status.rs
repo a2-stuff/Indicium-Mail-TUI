@@ -21,6 +21,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Accounts => "ACCOUNTS",
         Mode::Move => "MOVE",
         Mode::Info => "INFO",
+        Mode::FilePicker => "FILES",
     };
     let hints = match app.mode {
         Mode::Normal => "[c] compose  [Enter] open  [m] accounts  [,] settings  [/] search  [?] help  [q] quit  [i] info",
@@ -32,6 +33,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::Accounts => "j/k move  Enter edit  d delete  a add  Esc close",
         Mode::Move => "j/k move  Enter select  Esc cancel",
         Mode::Info => "Esc / q / i  close",
+        Mode::FilePicker => "j/k navigate  Enter toggle/enter  Backspace up  a confirm  Esc cancel",
     };
     let (sync_text, sync_style) = if app.is_busy() {
         (format!(" {} {} ", app.spinner_frame(), app.backend_status), theme::accent())

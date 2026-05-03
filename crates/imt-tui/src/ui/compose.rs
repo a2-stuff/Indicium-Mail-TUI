@@ -67,15 +67,13 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
     f.render_widget(&compose.body, chunks[5]);
 
     let attach_label = if compose.draft.attachments.is_empty() {
-        "(none) - Ctrl-A to add".to_string()
+        "Ctrl-A to add files".to_string()
     } else {
-        compose
-            .draft
-            .attachments
-            .iter()
-            .map(|a| a.filename.clone())
+        let names = compose.draft.attachments.iter()
+            .map(|a| a.filename.as_str())
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", ");
+        format!("[{}]  {}  (Ctrl-A add more  Backspace remove last)", compose.draft.attachments.len(), names)
     };
     render_field(f, chunks[6], "Attachments", &attach_label, compose.field == ComposeField::Attachments, true);
 

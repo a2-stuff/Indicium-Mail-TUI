@@ -22,6 +22,7 @@ pub enum Mode {
     Accounts,
     Move,
     Info,
+    FilePicker,
 }
 
 /// Field focus inside the onboarding modal.
@@ -163,6 +164,10 @@ pub enum KeyAction {
     MoveSelect,
     OpenInfo,
     CloseInfo,
+    FilePickerToggle,
+    FilePickerParent,
+    FilePickerConfirm,
+    FilePickerCancel,
 }
 
 /// Translate a key event to a `KeyAction` in normal mode (compose mode handled separately).
@@ -177,6 +182,7 @@ pub fn map_key(focus: Focus, mode: Mode, key: KeyEvent) -> Option<KeyAction> {
         Mode::Accounts => map_accounts(key),
         Mode::Move => map_move(key),
         Mode::Info => map_info(key),
+        Mode::FilePicker => map_file_picker(key),
     }
 }
 
@@ -258,6 +264,21 @@ fn map_normal(focus: Focus, key: KeyEvent) -> Option<KeyAction> {
 fn map_info(key: KeyEvent) -> Option<KeyAction> {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('i') => Some(KeyAction::CloseInfo),
+        _ => None,
+    }
+}
+
+fn map_file_picker(key: KeyEvent) -> Option<KeyAction> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(KeyAction::FilePickerCancel),
+        KeyCode::Up | KeyCode::Char('k') => Some(KeyAction::Up),
+        KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Down),
+        KeyCode::Enter | KeyCode::Char(' ') => Some(KeyAction::FilePickerToggle),
+        KeyCode::Backspace => Some(KeyAction::FilePickerParent),
+        KeyCode::Char('A') => Some(KeyAction::FilePickerConfirm),
+        KeyCode::Char('a') if ctrl => Some(KeyAction::FilePickerConfirm),
+        KeyCode::Char('a') => Some(KeyAction::FilePickerConfirm),
         _ => None,
     }
 }
