@@ -1,5 +1,9 @@
 # Indicium Mail TUI
 
+<p align="center">
+  <img src="Indicium-Mail-TUI.gif" alt="Indicium Mail TUI demo" />
+</p>
+
 A fast, modern terminal email client written in Rust.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
