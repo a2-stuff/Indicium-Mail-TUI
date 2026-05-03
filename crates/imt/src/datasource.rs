@@ -31,6 +31,8 @@ use crate::snapshot::Snapshot;
 /// owns the `SyncEngine`. Fire-and-forget; results land via `SyncEvent`s.
 pub enum Command {
     AddAccount { account: Account, password: String },
+    UpdateAccount { account: Account, password: Option<String> },
+    DeleteAccount { id: AccountId },
     SaveDraft(Draft),
     Send(Draft),
     FetchBody(MessageId),
@@ -152,6 +154,35 @@ impl DataSource for SyncDataSource {
         Ok(id)
     }
 
+    fn update_account(&self, id: AccountId, form: NewAccountForm, pw_changed: bool) -> Result<()> {
+        let existing_order = self.snapshot.read(|s| {
+            s.accounts.iter().find(|a| a.id == id).map(|a| a.order).unwrap_or(0)
+        });
+        let password = if pw_changed { Some(form.password.clone()) } else { None };
+        let mut account = form.into_account(existing_order);
+        account.id = id;
+        self.snapshot.write(|s| {
+            if let Some(pos) = s.accounts.iter().position(|a| a.id == id) {
+                s.accounts[pos] = account.clone();
+            }
+        });
+        self.commands
+            .send(Command::UpdateAccount { account, password })
+            .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
+        Ok(())
+    }
+
+    fn delete_account(&self, id: AccountId) -> Result<()> {
+        self.snapshot.write(|s| {
+            s.accounts.retain(|a| a.id != id);
+            s.folders_by_account.remove(&id);
+        });
+        self.commands
+            .send(Command::DeleteAccount { id })
+            .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
+        Ok(())
+    }
+
     fn status(&self) -> String {
         self.snapshot.read(|s| s.status.clone())
     }
@@ -182,6 +213,22 @@ pub async fn command_worker(
                 if let Err(e) = engine.add_account(account, password).await {
                     snapshot.set_status(format!("add account failed: {}", e));
                     snapshot.write(|s| s.accounts.retain(|a| a.id != id));
+                }
+            }
+            Command::UpdateAccount { account, password } => {
+                let id = account.id;
+                if let Err(e) = engine.update_account(account, password).await {
+                    snapshot.set_status(format!("update account failed: {}", e));
+                } else {
+                    snapshot.set_status("account updated");
+                    let _ = id;
+                }
+            }
+            Command::DeleteAccount { id } => {
+                if let Err(e) = engine.remove_account(id).await {
+                    snapshot.set_status(format!("delete account failed: {}", e));
+                } else {
+                    snapshot.set_status("account deleted");
                 }
             }
             Command::SaveDraft(draft) => {

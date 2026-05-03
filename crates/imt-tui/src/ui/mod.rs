@@ -1,5 +1,6 @@
 //! UI rendering: panes, modals, overlays.
 
+pub mod accounts;
 pub mod compose;
 pub mod help;
 pub mod layout;
@@ -7,6 +8,7 @@ pub mod list;
 pub mod onboarding;
 pub mod reader;
 pub mod search;
+pub mod settings;
 pub mod sidebar;
 pub mod status;
 
@@ -33,5 +35,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if app.mode == Mode::Help {
         help::render(f, f.area());
+    }
+    if app.mode == Mode::Settings {
+        settings::render_modal(f, f.area(), app);
+    }
+    if app.mode == Mode::Accounts {
+        accounts::render_modal(f, f.area(), app);
     }
 }

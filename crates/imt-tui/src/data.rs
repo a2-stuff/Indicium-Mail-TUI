@@ -34,6 +34,15 @@ pub trait DataSource: Send + Sync {
     fn add_account(&self, _form: NewAccountForm) -> anyhow::Result<AccountId> {
         anyhow::bail!("add_account not supported by this data source")
     }
+    /// Update an existing account from a form. `password` is optional - if
+    /// `None`, the existing stored password is kept. Default: not supported.
+    fn update_account(&self, _id: AccountId, _form: NewAccountForm, _password_changed: bool) -> anyhow::Result<()> {
+        anyhow::bail!("update_account not supported by this data source")
+    }
+    /// Delete an account and all its data. Default: not supported.
+    fn delete_account(&self, _id: AccountId) -> anyhow::Result<()> {
+        anyhow::bail!("delete_account not supported by this data source")
+    }
     /// Trigger a sync. `None` arguments mean "all". Default: no-op.
     fn refresh(&self, _account: Option<AccountId>, _folder: Option<FolderId>) {}
     /// Current backend status string (e.g. "syncing", "idle", "connecting").
@@ -189,6 +198,24 @@ impl DataSource for InMemoryDataSource {
         store.folders.insert(id, folders);
         store.accounts.push(account);
         Ok(id)
+    }
+
+    fn update_account(&self, id: AccountId, form: NewAccountForm, _pw_changed: bool) -> anyhow::Result<()> {
+        let mut store = self.inner.lock().unwrap();
+        let pos = store.accounts.iter().position(|a| a.id == id)
+            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+        let order = store.accounts[pos].order;
+        let mut updated = form.into_account(order);
+        updated.id = id;
+        store.accounts[pos] = updated;
+        Ok(())
+    }
+
+    fn delete_account(&self, id: AccountId) -> anyhow::Result<()> {
+        let mut store = self.inner.lock().unwrap();
+        store.accounts.retain(|a| a.id != id);
+        store.folders.remove(&id);
+        Ok(())
     }
 
     fn search(&self, query: &str) -> Vec<MessageId> {

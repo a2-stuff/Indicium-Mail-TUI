@@ -11,7 +11,21 @@ pub struct Config {
     #[serde(default)]
     pub general: GeneralConfig,
     #[serde(default)]
+    pub settings: imt_tui::Settings,
+    #[serde(default)]
     pub accounts: Vec<AccountConfig>,
+}
+
+impl Config {
+    /// Persist this config to `path`.
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        let s = toml::to_string_pretty(self)?;
+        std::fs::write(path, s)?;
+        Ok(())
+    }
 }
 
 /// General application settings.

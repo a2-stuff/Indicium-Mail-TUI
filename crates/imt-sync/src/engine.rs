@@ -55,6 +55,22 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// Update an existing account. If `password` is `Some`, the new value
+    /// is stored in the keyring/file. Restarts the per-account worker.
+    pub async fn update_account(&self, account: Account, password: Option<String>) -> Result<()> {
+        AccountRepo::new(self.db.pool()).upsert(&account).await?;
+        if let Some(p) = password {
+            secrets::store(account.id, "imap_password", &p);
+            secrets::store(account.id, "smtp_password", &p);
+        }
+        if let Some(prev) = self.tasks.lock().await.remove(&account.id) {
+            prev.cancel.notify_waiters();
+            let _ = prev.handle.await;
+        }
+        self.spawn_task(account).await;
+        Ok(())
+    }
+
     /// Cancel an account's worker (if any), delete its row from the store, and clear secrets.
     pub async fn remove_account(&self, id: AccountId) -> Result<()> {
         if let Some(task) = self.tasks.lock().await.remove(&id) {

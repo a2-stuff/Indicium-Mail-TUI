@@ -18,6 +18,8 @@ pub enum Mode {
     Search,
     Help,
     Onboarding,
+    Settings,
+    Accounts,
 }
 
 /// Field focus inside the onboarding modal.
@@ -144,6 +146,15 @@ pub enum KeyAction {
     OnboardingCycleRight,
     OpenHtmlInBrowser,
     Refresh,
+    OpenSettings,
+    SaveSettings,
+    CancelSettings,
+    SettingsToggle,
+    OpenAccounts,
+    CloseAccounts,
+    AccountsEdit,
+    AccountsDelete,
+    AccountsAdd,
 }
 
 /// Translate a key event to a `KeyAction` in normal mode (compose mode handled separately).
@@ -154,6 +165,32 @@ pub fn map_key(focus: Focus, mode: Mode, key: KeyEvent) -> Option<KeyAction> {
         Mode::Search => map_search(key),
         Mode::Normal => map_normal(focus, key),
         Mode::Onboarding => map_onboarding(key),
+        Mode::Settings => map_settings(key),
+        Mode::Accounts => map_accounts(key),
+    }
+}
+
+fn map_settings(key: KeyEvent) -> Option<KeyAction> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Char('s') if ctrl => Some(KeyAction::SaveSettings),
+        KeyCode::Esc => Some(KeyAction::CancelSettings),
+        KeyCode::Tab => Some(KeyAction::FocusNext),
+        KeyCode::BackTab => Some(KeyAction::FocusPrev),
+        KeyCode::Char(' ') | KeyCode::Enter => Some(KeyAction::SettingsToggle),
+        _ => None,
+    }
+}
+
+fn map_accounts(key: KeyEvent) -> Option<KeyAction> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(KeyAction::CloseAccounts),
+        KeyCode::Up | KeyCode::Char('k') => Some(KeyAction::Up),
+        KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Down),
+        KeyCode::Enter | KeyCode::Char('e') => Some(KeyAction::AccountsEdit),
+        KeyCode::Char('d') | KeyCode::Delete => Some(KeyAction::AccountsDelete),
+        KeyCode::Char('a') | KeyCode::Char('A') => Some(KeyAction::AccountsAdd),
+        _ => None,
     }
 }
 
@@ -189,6 +226,8 @@ fn map_normal(focus: Focus, key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('o') => Some(KeyAction::OpenHtmlInBrowser),
         KeyCode::F(5) => Some(KeyAction::Refresh),
         KeyCode::Char('r') if ctrl => Some(KeyAction::Refresh),
+        KeyCode::Char(',') => Some(KeyAction::OpenSettings),
+        KeyCode::Char('M') => Some(KeyAction::OpenAccounts),
         _ => None,
     }
 }

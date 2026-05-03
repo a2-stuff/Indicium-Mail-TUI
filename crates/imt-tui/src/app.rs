@@ -244,6 +244,54 @@ pub struct App {
     pub backend_status: String,
     /// Tick at which `status` was last set; status auto-clears after `STATUS_TTL_TICKS`.
     pub status_set_tick: u64,
+    /// Current runtime settings.
+    pub settings: crate::settings::Settings,
+    /// Settings modal state, when open.
+    pub settings_state: Option<SettingsState>,
+    /// Account manager state, when open.
+    pub accounts_state: Option<AccountsState>,
+    /// When set, the next onboarding save is interpreted as edit-of-existing
+    /// rather than add-new.
+    pub onboarding_edit_id: Option<imt_core::AccountId>,
+    /// Tick at which the last auto-refresh fired.
+    pub last_auto_refresh_tick: u64,
+    /// Hook for the binary to persist settings; called whenever settings change.
+    pub on_settings_changed: Option<std::sync::Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>>,
+}
+
+/// Settings modal state.
+pub struct SettingsState {
+    pub field: crate::settings::SettingsField,
+    pub auto_refresh_secs: tui_input::Input,
+    pub browser: tui_input::Input,
+    pub draft: crate::settings::Settings,
+}
+
+impl SettingsState {
+    pub fn from_settings(s: &crate::settings::Settings) -> Self {
+        Self {
+            field: crate::settings::SettingsField::AutoRefreshSecs,
+            auto_refresh_secs: tui_input::Input::new(s.auto_refresh_secs.to_string()),
+            browser: tui_input::Input::new(s.browser.clone()),
+            draft: s.clone(),
+        }
+    }
+}
+
+/// Account manager state.
+pub struct AccountsState {
+    pub selected: usize,
+    pub confirm_delete: Option<imt_core::AccountId>,
+}
+
+impl AccountsState {
+    pub fn new() -> Self {
+        Self { selected: 0, confirm_delete: None }
+    }
+}
+
+impl Default for AccountsState {
+    fn default() -> Self { Self::new() }
 }
 
 const STATUS_TTL_TICKS: u64 = 24;
@@ -311,6 +359,12 @@ impl App {
             ticks: 0,
             backend_status: String::new(),
             status_set_tick: 0,
+            settings: crate::settings::Settings::default(),
+            settings_state: None,
+            accounts_state: None,
+            onboarding_edit_id: None,
+            last_auto_refresh_tick: 0,
+            on_settings_changed: None,
         };
         app.refresh_messages();
         if app.accounts.is_empty() {
@@ -324,6 +378,25 @@ impl App {
     pub fn set_html_external(&mut self, on: bool, browser: String) {
         self.html_external = on;
         self.browser = browser;
+    }
+
+    /// Apply a complete `Settings` value to the running app.
+    pub fn apply_settings(&mut self, s: crate::settings::Settings) {
+        self.html_external = s.html_external;
+        self.browser = s.browser.clone();
+        self.settings = s;
+    }
+
+    /// Open the settings modal.
+    pub fn open_settings(&mut self) {
+        self.settings_state = Some(SettingsState::from_settings(&self.settings));
+        self.mode = crate::keymap::Mode::Settings;
+    }
+
+    /// Open the account manager modal.
+    pub fn open_accounts(&mut self) {
+        self.accounts_state = Some(AccountsState::new());
+        self.mode = crate::keymap::Mode::Accounts;
     }
 
     /// Open the onboarding modal with a fresh form.
@@ -378,6 +451,13 @@ impl App {
         self.backend_status = self.data.status();
         if !self.status.is_empty() && self.ticks.saturating_sub(self.status_set_tick) >= STATUS_TTL_TICKS {
             self.status.clear();
+        }
+        if self.settings.auto_refresh_secs > 0 {
+            let interval_ticks = (self.settings.auto_refresh_secs as u64) * 4;
+            if self.ticks.saturating_sub(self.last_auto_refresh_tick) >= interval_ticks {
+                self.last_auto_refresh_tick = self.ticks;
+                self.data.refresh(None, None);
+            }
         }
         let new_accounts = self.data.accounts();
         let accounts_changed = new_accounts.len() != self.accounts.len()
@@ -477,6 +557,30 @@ impl App {
             }
             self.search_input.handle_event(&crossterm::event::Event::Key(key));
             self.run_search();
+            return;
+        }
+        if self.mode == Mode::Settings {
+            if let Some(action) = map_key(self.focus, self.mode, key) {
+                self.dispatch(action);
+                return;
+            }
+            if let Some(s) = self.settings_state.as_mut() {
+                use crate::settings::SettingsField;
+                let evt = crossterm::event::Event::Key(key);
+                match s.field {
+                    SettingsField::AutoRefreshSecs => {
+                        if accept_numeric(key) { s.auto_refresh_secs.handle_event(&evt); }
+                    }
+                    SettingsField::Browser => { s.browser.handle_event(&evt); }
+                    _ => {}
+                }
+            }
+            return;
+        }
+        if self.mode == Mode::Accounts {
+            if let Some(action) = map_key(self.focus, self.mode, key) {
+                self.dispatch(action);
+            }
             return;
         }
         if self.mode == Mode::Onboarding {
@@ -625,6 +729,24 @@ impl App {
                 self.set_status("refreshing...");
                 self.backend_status = "refreshing".into();
             }
+            KeyAction::OpenSettings => self.open_settings(),
+            KeyAction::CancelSettings => {
+                self.settings_state = None;
+                self.mode = Mode::Normal;
+            }
+            KeyAction::SaveSettings => self.save_settings(),
+            KeyAction::SettingsToggle => self.toggle_setting_field(),
+            KeyAction::OpenAccounts => self.open_accounts(),
+            KeyAction::CloseAccounts => {
+                self.accounts_state = None;
+                self.mode = Mode::Normal;
+            }
+            KeyAction::AccountsEdit => self.edit_selected_account(),
+            KeyAction::AccountsDelete => self.delete_selected_account(),
+            KeyAction::AccountsAdd => {
+                self.accounts_state = None;
+                self.open_onboarding();
+            }
         }
     }
 
@@ -660,6 +782,21 @@ impl App {
             }
             None => return,
         };
+        if let Some(edit_id) = self.onboarding_edit_id.take() {
+            let pw_changed = !form.password.is_empty();
+            match self.data.update_account(edit_id, form, pw_changed) {
+                Ok(()) => {
+                    self.onboarding = None;
+                    self.mode = Mode::Normal;
+                    self.set_status("Account updated");
+                }
+                Err(e) => {
+                    self.set_status(format!("Update failed: {e}"));
+                    self.last_error = Some(e.to_string());
+                }
+            }
+            return;
+        }
         match self.data.add_account(form) {
             Ok(id) => {
                 let accounts_raw = self.data.accounts();
@@ -687,6 +824,83 @@ impl App {
                 self.status = format!("Add failed: {e}");
                 self.last_error = Some(e.to_string());
             }
+        }
+    }
+
+    fn save_settings(&mut self) {
+        let Some(state) = self.settings_state.as_ref() else { return; };
+        let mut new_settings = state.draft.clone();
+        new_settings.auto_refresh_secs = state
+            .auto_refresh_secs
+            .value()
+            .parse::<u32>()
+            .unwrap_or(self.settings.auto_refresh_secs);
+        new_settings.browser = state.browser.value().to_string();
+        if let Some(cb) = self.on_settings_changed.clone() {
+            cb(&new_settings);
+        }
+        self.apply_settings(new_settings);
+        self.settings_state = None;
+        self.mode = Mode::Normal;
+        self.set_status("Settings saved");
+    }
+
+    fn toggle_setting_field(&mut self) {
+        use crate::settings::SettingsField;
+        let Some(state) = self.settings_state.as_mut() else { return; };
+        match state.field {
+            SettingsField::MarkReadOnOpen => state.draft.mark_read_on_open = !state.draft.mark_read_on_open,
+            SettingsField::HtmlExternal => state.draft.html_external = !state.draft.html_external,
+            SettingsField::ShowSnippet => state.draft.show_snippet = !state.draft.show_snippet,
+            _ => {}
+        }
+    }
+
+    fn edit_selected_account(&mut self) {
+        let Some(state) = self.accounts_state.as_ref() else { return; };
+        let Some(av) = self.accounts.get(state.selected) else { return; };
+        let acc = &av.account;
+        let mut form = OnboardingState::new();
+        form.display_name = tui_input::Input::new(acc.display_name.clone());
+        form.email = tui_input::Input::new(acc.address.email.clone());
+        form.imap_host = tui_input::Input::new(acc.imap.host.clone());
+        form.imap_port = tui_input::Input::new(acc.imap.port.to_string());
+        form.imap_tls = acc.imap.tls;
+        form.smtp_host = tui_input::Input::new(acc.smtp.host.clone());
+        form.smtp_port = tui_input::Input::new(acc.smtp.port.to_string());
+        form.smtp_tls = acc.smtp.tls;
+        let user = match &acc.imap.auth {
+            imt_core::AuthMethod::Password { username } => username.clone(),
+            imt_core::AuthMethod::OAuth2 { username, .. } => username.clone(),
+        };
+        form.username = tui_input::Input::new(user);
+        form.user_edited_imap = true;
+        form.user_edited_smtp = true;
+        self.onboarding_edit_id = Some(acc.id);
+        self.onboarding = Some(form);
+        self.accounts_state = None;
+        self.mode = Mode::Onboarding;
+    }
+
+    fn delete_selected_account(&mut self) {
+        let pending_id = self.accounts_state.as_ref().and_then(|s| s.confirm_delete);
+        if let Some(id) = pending_id {
+            let result = self.data.delete_account(id);
+            if let Some(s) = self.accounts_state.as_mut() {
+                s.confirm_delete = None;
+            }
+            match result {
+                Ok(()) => self.set_status("Account deleted"),
+                Err(e) => self.set_status(format!("Delete failed: {e}")),
+            }
+            return;
+        }
+        let target_id = self
+            .accounts_state
+            .as_ref()
+            .and_then(|s| self.accounts.get(s.selected).map(|av| av.account.id));
+        if let (Some(id), Some(s)) = (target_id, self.accounts_state.as_mut()) {
+            s.confirm_delete = Some(id);
         }
     }
 
@@ -724,6 +938,12 @@ impl App {
             }
             return;
         }
+        if self.mode == Mode::Settings {
+            if let Some(s) = self.settings_state.as_mut() {
+                s.field = s.field.next();
+            }
+            return;
+        }
         self.focus = match self.focus {
             Focus::Sidebar => Focus::MessageList,
             Focus::MessageList => Focus::Reader,
@@ -744,6 +964,12 @@ impl App {
             }
             return;
         }
+        if self.mode == Mode::Settings {
+            if let Some(s) = self.settings_state.as_mut() {
+                s.field = s.field.prev();
+            }
+            return;
+        }
         self.focus = match self.focus {
             Focus::Sidebar => Focus::Reader,
             Focus::MessageList => Focus::Sidebar,
@@ -752,6 +978,13 @@ impl App {
     }
 
     fn move_up(&mut self) {
+        if self.mode == Mode::Accounts {
+            if let Some(s) = self.accounts_state.as_mut() {
+                if s.selected > 0 { s.selected -= 1; }
+                s.confirm_delete = None;
+            }
+            return;
+        }
         match self.focus {
             Focus::Sidebar => self.sidebar_up(),
             Focus::MessageList => {
@@ -767,6 +1000,13 @@ impl App {
     }
 
     fn move_down(&mut self) {
+        if self.mode == Mode::Accounts {
+            if let Some(s) = self.accounts_state.as_mut() {
+                if s.selected + 1 < self.accounts.len() { s.selected += 1; }
+                s.confirm_delete = None;
+            }
+            return;
+        }
         match self.focus {
             Focus::Sidebar => self.sidebar_down(),
             Focus::MessageList => {
@@ -856,7 +1096,9 @@ impl App {
         }
         if let Some(m) = self.current_message() {
             let id = m.id;
-            self.data.mark_read(id);
+            if self.settings.mark_read_on_open {
+                self.data.mark_read(id);
+            }
             self.refresh_messages();
             self.focus = Focus::Reader;
         }

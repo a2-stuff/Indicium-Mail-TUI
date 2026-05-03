@@ -159,11 +159,16 @@ async fn main() -> anyhow::Result<()> {
 async fn run_tui(mock: bool, db_path: &std::path::Path, cfg_path: Option<PathBuf>) -> anyhow::Result<()> {
     let dirs = project_dirs()?;
     let cfg_path = cfg_path.unwrap_or_else(|| dirs.config_dir().join("config.toml"));
-    let _config = config::Config::load_or_default(&cfg_path)?;
+    let mut cfg = config::Config::load_or_default(&cfg_path)?;
 
     if mock {
         tracing::info!("starting TUI with in-memory mock");
-        return imt_tui::run(InMemoryDataSource::sample()).await;
+        return imt_tui::run_with(
+            InMemoryDataSource::sample(),
+            cfg.settings.clone(),
+            std::sync::Arc::new(|_| {}),
+        )
+        .await;
     }
 
     tracing::info!("starting TUI with real backend, db={}", db_path.display());
@@ -202,7 +207,19 @@ async fn run_tui(mock: bool, db_path: &std::path::Path, cfg_path: Option<PathBuf
     tokio::spawn(async move {
         command_worker(engine_for_cmds, db_for_cmds, snap_for_cmds, inflight_for_cmds, cmd_rx).await;
     });
-    let result = imt_tui::run(data).await;
+
+    let initial_settings = cfg.settings.clone();
+    let cfg_path_for_save = cfg_path.clone();
+    let cfg_shared = std::sync::Arc::new(std::sync::Mutex::new(cfg));
+    let cfg_for_cb = cfg_shared.clone();
+    let on_settings_changed: std::sync::Arc<dyn Fn(&imt_tui::Settings) + Send + Sync> = std::sync::Arc::new(move |s: &imt_tui::Settings| {
+        let mut guard = cfg_for_cb.lock().unwrap();
+        guard.settings = s.clone();
+        if let Err(e) = guard.save(&cfg_path_for_save) {
+            tracing::warn!("save config: {}", e);
+        }
+    });
+    let result = imt_tui::run_with(data, initial_settings, on_settings_changed).await;
     let _ = engine.shutdown().await;
     result
 }

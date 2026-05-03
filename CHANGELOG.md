@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2026-05-03
+
+### Added
+- **Settings modal** (`,` in normal mode): auto-refresh interval (seconds; 0 disables polling, IDLE remains active), mark-as-read on open, HTML external viewer toggle, browser command, show preview snippet. Persisted to `~/.config/indicium-mail-tui/config.toml` on save.
+- **Account Manager modal** (`M` in normal mode): list configured accounts with their IMAP/SMTP details. Actions: `Enter`/`e` edit (re-uses the onboarding form pre-filled), `d` delete (with `d`-again confirmation), `a` add. `Esc`/`q` close.
+- `DataSource::update_account`, `DataSource::delete_account`, `SyncEngine::update_account`, and `Command::UpdateAccount` / `Command::DeleteAccount` to back the new modal.
+- `Settings` info panel explicitly notes that messages are never deleted from the server (fetches use `BODY.PEEK[]`).
+
+### Changed
+- Auto-refresh ticks at the configured interval when set; otherwise the IDLE worker handles new mail push.
+
 ## [0.0.7] - 2026-05-03
 
 ### Fixed
