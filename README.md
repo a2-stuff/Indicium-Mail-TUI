@@ -4,6 +4,17 @@
   <img src="Indicium-Mail-TUI.gif" alt="Indicium Mail TUI demo" />
 </p>
 
+<table align="center">
+  <tr>
+    <td><img src="screen1.png" alt="Screenshot 1" width="100%" /></td>
+    <td><img src="screen2.png" alt="Screenshot 2" width="100%" /></td>
+  </tr>
+  <tr>
+    <td><img src="screen3.png" alt="Screenshot 3" width="100%" /></td>
+    <td><img src="screen4.png" alt="Screenshot 4" width="100%" /></td>
+  </tr>
+</table>
+
 A keyboard-driven terminal email client built in Rust. Reads and sends mail over standard IMAP/SMTP with real push delivery via RFC 2177 IDLE, stores everything locally in SQLite, and never opens a browser - HTML renders inline, OAuth2 flows run inside the TUI itself.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
