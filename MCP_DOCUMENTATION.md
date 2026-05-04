@@ -65,7 +65,7 @@ The server implements MCP 2024-11-05 over JSON-RPC 2.0.
 
 ```jsonl
 → {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"claude","version":"1"}}}
-← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"imt-mcp","version":"0.0.17"}}}
+← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"imt-mcp","version":"0.0.18"}}}
 → {"jsonrpc":"2.0","method":"initialized","params":{}}
 → {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
 ← {"jsonrpc":"2.0","id":2,"result":{"tools":[...]}}
@@ -120,6 +120,8 @@ Fetch the full body of a message. Automatically downloads from IMAP if not yet c
 | `message_id` | string (UUID) | yes | Message ID from `list_messages` |
 
 **Returns:** JSON object with `id`, `subject`, `from`, `to`, `cc`, `date`, `flags`, `body_text`, `body_html`, `snippet`.
+
+**Errors:** if the IMAP body fetch returns no content (server unavailable, message moved, transient failure), the tool returns `body fetch returned no content` rather than empty `body_text`/`body_html`.
 
 ---
 
@@ -207,14 +209,16 @@ Move a message to another folder.
 ---
 
 ### `delete_message`
-Move a message to Trash (or report if no Trash folder exists).
+Move a message to Trash. Returns an error if no Trash folder is configured for the account.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `message_id` | string (UUID) | yes | Message to delete |
 
-**Returns:** `"Message moved to Trash"` or `"No Trash folder found - message kept on server"`.
+**Returns:** `"Message moved to Trash"` on success.
+
+**Errors:** `"No Trash folder configured - cannot delete. Move to a folder instead."` when the account has no folder with the Trash role. Use `move_message` to move to a specific folder of your choice.
 
 ---
 
@@ -259,5 +263,7 @@ Write operations go through the SyncEngine which manages IMAP/SMTP connections w
 ## Credentials and security
 
 Credentials are never sent to the AI agent. The `imt mcp` process loads them from the local secrets store (`~/.local/share/indicium-mail-tui/secrets/`) exactly as the TUI does. The agent only sees message content.
+
+The transport caps each JSON-RPC line at **4 MB** to bound memory against a malformed or hostile client. Larger requests are rejected with an error.
 
 Set `RUST_LOG=imt_mcp=debug` for verbose protocol logging.
