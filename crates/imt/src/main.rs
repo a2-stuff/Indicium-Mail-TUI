@@ -11,6 +11,7 @@ use imt_sync::SyncEngine;
 use imt_tui::InMemoryDataSource;
 use tokio::sync::mpsc;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use imt_mcp;
 
 mod cli;
 mod config;
@@ -76,6 +77,9 @@ enum Cmd {
         /// Account UUID (see `imt list-accounts`).
         id: String,
     },
+    /// Start the MCP (Model Context Protocol) server on stdin/stdout.
+    /// AI agents connect by spawning this process and communicating via JSON-RPC 2.0.
+    Mcp,
 }
 
 fn project_dirs() -> anyhow::Result<ProjectDirs> {
@@ -153,7 +157,38 @@ async fn main() -> anyhow::Result<()> {
         Cmd::ListAccounts => cli::list_accounts(&db_path).await,
         Cmd::DeleteAccount { id } => cli::delete_account(&db_path, &id).await,
         Cmd::Run { mock } => run_tui(mock, &db_path, args.config.clone()).await,
+        Cmd::Mcp => run_mcp(&db_path).await,
     }
+}
+
+async fn run_mcp(db_path: &std::path::Path) -> anyhow::Result<()> {
+    tracing::info!("starting MCP server, db={}", db_path.display());
+    let db = Arc::new(Db::open(db_path).await.context("opening database")?);
+
+    let (engine, mut event_rx) = SyncEngine::new(db.clone());
+    let engine = Arc::new(engine);
+
+    // Start account workers for all configured accounts
+    let accounts = imt_store::AccountRepo::new(db.pool()).list().await?;
+    for acc in accounts {
+        let pwd = imt_store::secrets::load(acc.id, "imap_password").unwrap_or_default();
+        if let Err(e) = engine.add_account(acc.clone(), pwd, None).await {
+            tracing::warn!("spawn account worker for {}: {}", acc.address.email, e);
+        }
+    }
+
+    // Drain sync events in the background (keeps workers healthy)
+    tokio::spawn(async move {
+        while let Some(_event) = event_rx.recv().await {}
+    });
+
+    let ctx = Arc::new(imt_mcp::McpContext {
+        db,
+        engine: engine.clone(),
+    });
+    let result = imt_mcp::run(ctx).await;
+    let _ = engine.shutdown().await;
+    result
 }
 
 async fn run_tui(mock: bool, db_path: &std::path::Path, cfg_path: Option<PathBuf>) -> anyhow::Result<()> {

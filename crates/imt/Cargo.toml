@@ -17,6 +17,7 @@ imt-store = { path = "../imt-store" }
 imt-net = { path = "../imt-net" }
 imt-sync = { path = "../imt-sync" }
 imt-tui = { path = "../imt-tui" }
+imt-mcp = { path = "../imt-mcp" }
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

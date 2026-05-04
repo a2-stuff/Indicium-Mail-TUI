@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.17] - 2026-05-04
+
+### Added
+- **MCP server** (`imt mcp`): start Indicium Mail TUI as a Model Context Protocol server so AI agents can manage email via tool calls. Communicates over stdin/stdout with newline-delimited JSON-RPC 2.0, implementing the MCP 2024-11-05 specification.
+- **12 MCP tools**: `list_accounts`, `list_folders`, `list_messages`, `read_message`, `search`, `send`, `reply`, `mark_read`, `toggle_flag`, `move_message`, `delete_message` - covering the full read/write email lifecycle.
+- Read tools query the local SQLite cache directly (no network); `read_message` auto-fetches body from IMAP on first access. Write tools go through the existing SyncEngine with OAuth2 token refresh, TLS, and retry logic.
+- `MCP_DOCUMENTATION.md`: complete guide covering Claude Desktop setup, JSON-RPC protocol flow, all tool schemas with parameter tables, an example agent workflow, and architecture diagram.
+
 ## [0.0.16] - 2026-05-03
 
 ### Added

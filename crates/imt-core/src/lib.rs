@@ -19,7 +19,7 @@ pub use folder::{Folder, FolderId, FolderRole};
 pub use message::{Message, MessageId, MessageHeaders, MessagePart, MessageBody, Attachment};
 pub use thread::{Thread, ThreadId};
 pub use flag::Flag;
-pub use draft::{Draft, DraftId};
+pub use draft::{Draft, DraftId, DraftKind};
 pub use event::SyncEvent;
 pub use error::{CoreError, Result};
 pub use id::Uid;

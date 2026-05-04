@@ -1,0 +1,17 @@
+[package]
+name = "imt-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+imt-core = { path = "../imt-core" }
+imt-store = { path = "../imt-store" }
+imt-sync = { path = "../imt-sync" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

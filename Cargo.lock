@@ -1258,13 +1258,14 @@ dependencies = [
 
 [[package]]
 name = "imt"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
  "directories",
  "imt-core",
+ "imt-mcp",
  "imt-net",
  "imt-store",
  "imt-sync",
@@ -1281,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "imt-core"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "bytes",
  "chrono",
@@ -1291,8 +1292,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "imt-mcp"
+version = "0.0.17"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "imt-core",
+ "imt-store",
+ "imt-sync",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "imt-net"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "anyhow",
  "async-imap",
@@ -1320,7 +1337,7 @@ dependencies = [
 
 [[package]]
 name = "imt-store"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1339,7 +1356,7 @@ dependencies = [
 
 [[package]]
 name = "imt-sync"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1357,7 +1374,7 @@ dependencies = [
 
 [[package]]
 name = "imt-tui"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "anyhow",
  "base64",
