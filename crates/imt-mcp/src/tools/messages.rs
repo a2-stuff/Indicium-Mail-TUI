@@ -75,12 +75,17 @@ pub async fn read_message(ctx: &McpContext, params: Value) -> anyhow::Result<Val
         ctx.engine
             .fetch_body(message_id)
             .await
-            .context("failed to fetch body from IMAP")?;
+            .context("failed to fetch message body from IMAP")?;
 
-        MessageRepo::new(ctx.db.pool())
+        let refetched = MessageRepo::new(ctx.db.pool())
             .get(message_id)
             .await
-            .context("failed to re-fetch message after body fetch")?
+            .context("failed to re-fetch message after body fetch")?;
+
+        if refetched.body.is_none() {
+            return Err(anyhow::anyhow!("body fetch returned no content"));
+        }
+        refetched
     } else {
         msg
     };

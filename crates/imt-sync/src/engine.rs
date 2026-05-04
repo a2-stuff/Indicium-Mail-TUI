@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::Utc;
 use tokio::sync::{mpsc, Mutex, Notify};
 use tokio::task::JoinHandle;
 use tracing::warn;
@@ -275,38 +274,12 @@ impl SyncEngine {
                 Ok(()) => {
                     if let Err(e) = backend.append(&sent.path, &raw, &[Flag::Seen]).await {
                         warn!(target: "imt-sync::engine", "append to Sent failed: {}", e);
-                    } else {
-                        let stub = Message {
-                            id: MessageId::new(),
-                            account_id: acc.id,
-                            folder_id: sent.id,
-                            thread_id: None,
-                            uid: Uid(0),
-                            headers: imt_core::MessageHeaders {
-                                rfc_message_id: None,
-                                in_reply_to: None,
-                                references: Vec::new(),
-                                from: vec![draft.from.clone()],
-                                to: draft.to.clone(),
-                                cc: draft.cc.clone(),
-                                bcc: draft.bcc.clone(),
-                                reply_to: Vec::new(),
-                                subject: draft.subject.clone(),
-                                date: Utc::now(),
-                            },
-                            flags: vec![Flag::Seen],
-                            size: raw.len() as u64,
-                            body: None,
-                            snippet: crate::snippet::make_snippet(&draft.body_text, 256),
-                            internal_date: Utc::now(),
-                        };
-                        if let Err(e) = MessageRepo::new(self.db.pool())
-                            .upsert_envelope(&stub)
-                            .await
-                        {
-                            warn!(target: "imt-sync::engine", "store sent stub: {}", e);
-                        }
                     }
+                    // Trigger a sync so the new sent message appears.
+                    let _ = self.tx.send(SyncEvent::SyncStarted {
+                        account_id: acc.id,
+                        folder_id: Some(sent.id),
+                    });
                     let _ = backend.disconnect().await;
                 }
                 Err(e) => warn!(target: "imt-sync::engine", "append connect failed: {}", e),
@@ -332,7 +305,13 @@ impl SyncEngine {
         backend.move_uid(&src_folder.path, msg.uid.0, &dst_folder.path).await?;
         let _ = backend.disconnect().await;
 
-        msg_repo.delete_by_uid(src_folder.id, msg.uid).await?;
+        if let Err(e) = msg_repo.delete_by_uid(src_folder.id, msg.uid).await {
+            tracing::warn!(target: "imt-sync::engine", "delete_by_uid after move failed: {} - scheduling resync", e);
+            // Queue a background resync to reconcile state. We can't do it inline
+            // without recursion concerns, so just log and let next IDLE/refresh handle it.
+            let _ = self.tx.send(SyncEvent::SyncFinished { account_id: msg.account_id, folder_id: Some(src_folder.id) });
+            return Err(e.into());
+        }
         let _ = self.tx.send(SyncEvent::MessageRemoved {
             folder_id: src_folder.id,
             uid: msg.uid,

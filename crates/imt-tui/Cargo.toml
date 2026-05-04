@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 imt-core = { path = "../imt-core" }
+imt-net = { path = "../imt-net" }
 ratatui.workspace = true
 crossterm.workspace = true
 tui-textarea.workspace = true
@@ -24,6 +25,3 @@ once_cell.workspace = true
 directories.workspace = true
 unicode-width = "0.2"
 uuid.workspace = true
-sha2.workspace = true
-base64.workspace = true
-rand.workspace = true

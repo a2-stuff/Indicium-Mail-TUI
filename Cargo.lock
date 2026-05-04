@@ -1258,18 +1258,20 @@ dependencies = [
 
 [[package]]
 name = "imt"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
  "directories",
+ "futures",
  "imt-core",
  "imt-mcp",
  "imt-net",
  "imt-store",
  "imt-sync",
  "imt-tui",
+ "lru",
  "rpassword",
  "serde",
  "tokio",
@@ -1282,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "imt-core"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "bytes",
  "chrono",
@@ -1293,7 +1295,7 @@ dependencies = [
 
 [[package]]
 name = "imt-mcp"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1309,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "imt-net"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "anyhow",
  "async-imap",
@@ -1337,7 +1339,7 @@ dependencies = [
 
 [[package]]
 name = "imt-store"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1356,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "imt-sync"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1374,21 +1376,19 @@ dependencies = [
 
 [[package]]
 name = "imt-tui"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "anyhow",
- "base64",
  "chrono",
  "crossterm",
  "directories",
  "futures",
  "html2text",
  "imt-core",
+ "imt-net",
  "once_cell",
- "rand 0.8.6",
  "ratatui",
  "serde",
- "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -3179,7 +3179,6 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

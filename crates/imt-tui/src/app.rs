@@ -68,20 +68,6 @@ impl ComposeState {
     }
 }
 
-fn urlencoding_simple(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            b' ' => out.push('+'),
-            _ => { out.push('%'); out.push_str(&format!("{:02X}", b)); }
-        }
-    }
-    out
-}
-
 fn addr_join(v: &[Address]) -> String {
     v.iter().map(|a| a.format()).collect::<Vec<_>>().join(", ")
 }
@@ -150,6 +136,8 @@ pub struct OnboardingState {
     pub auth_code: Input,
     /// PKCE verifier generated when the auth URL was first built (stable across re-renders).
     pub oauth_pkce_verifier: Option<String>,
+    /// CSRF state token round-tripped through the authorization endpoint.
+    pub oauth_state: Option<String>,
     /// Generated auth URL shown to the user.
     pub oauth_auth_url: Option<String>,
     /// Redirect URI used in the auth URL.
@@ -185,6 +173,7 @@ impl OnboardingState {
             client_secret: Input::default(),
             auth_code: Input::default(),
             oauth_pkce_verifier: None,
+            oauth_state: None,
             oauth_auth_url: None,
             oauth_redirect_uri: "http://localhost:9876".to_string(),
             user_edited_imap: false,
@@ -1172,6 +1161,9 @@ impl App {
     }
 
     /// Generate the OAuth2 PKCE verifier and auth URL if not already done.
+    ///
+    /// Delegates to `imt_net::OAuthFlow` so PKCE, state token, and provider
+    /// scope/URL handling stay consistent with the rest of the workspace.
     fn ensure_oauth_url_generated(&mut self) {
         let o = match self.onboarding.as_mut() { Some(o) => o, None => return };
         if !o.use_oauth2 || o.oauth_pkce_verifier.is_some() { return; }
@@ -1179,55 +1171,29 @@ impl App {
         let client_id = o.client_id.value().trim().to_string();
         if client_id.is_empty() { return; }
 
-        // Generate PKCE verifier (32 random bytes, base64url-encoded).
-        use base64::Engine;
-        use sha2::Digest;
-        let mut raw = [0u8; 32];
-        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut raw);
-        let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
-        let challenge = {
-            let digest = sha2::Sha256::digest(verifier.as_bytes());
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
-        };
-        let state = {
-            let mut sb = [0u8; 16];
-            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut sb);
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sb)
-        };
+        let client_secret_raw = o.client_secret.value().trim().to_string();
+        let client_secret = if client_secret_raw.is_empty() { None } else { Some(client_secret_raw) };
 
-        // Detect provider from IMAP host to build the correct auth URL.
+        // Detect provider from IMAP host; default to Google when unknown.
         let imap_host = o.imap_host.value().to_string();
-        let (auth_url_base, scopes) = if imap_host.contains("gmail") || imap_host.contains("googlemail") {
-            ("https://accounts.google.com/o/oauth2/v2/auth", "https://mail.google.com/")
-        } else if imap_host.contains("outlook") || imap_host.contains("office365") {
-            ("https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
-             "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send")
-        } else if imap_host.contains("yahoo") {
-            ("https://api.login.yahoo.com/oauth2/request_auth", "mail-w")
-        } else {
-            ("https://accounts.google.com/o/oauth2/v2/auth", "https://mail.google.com/")
-        };
+        let provider = imt_net::OAuthProvider::from_imap_host(&imap_host)
+            .unwrap_or(imt_net::OAuthProvider::Google);
 
-        let redirect_uri = &o.oauth_redirect_uri.clone();
+        let redirect_uri = o.oauth_redirect_uri.clone();
         let email = o.email.value().trim().to_string();
-        let url = format!(
-            "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent{}",
-            auth_url_base,
-            urlencoding_simple(&client_id),
-            urlencoding_simple(redirect_uri),
-            urlencoding_simple(scopes),
-            state,
-            challenge,
-            if email.is_empty() { String::new() } else { format!("&login_hint={}", urlencoding_simple(&email)) }
-        );
+        let login_hint: Option<&str> = if email.is_empty() { None } else { Some(email.as_str()) };
 
-        o.oauth_pkce_verifier = Some(verifier);
-        o.oauth_auth_url = Some(url.clone());
+        let flow = imt_net::OAuthFlow::new(provider, client_id, client_secret);
+        let (url, verifier, state) = flow.authorize_url(&redirect_uri, login_hint);
+        let url_string = url.to_string();
+
+        o.oauth_pkce_verifier = Some(verifier.0);
+        o.oauth_state = Some(state.0);
+        o.oauth_auth_url = Some(url_string.clone());
 
         // Best-effort: open in default browser.
-        let url_for_spawn = url;
         tokio::spawn(async move {
-            let _ = tokio::process::Command::new("xdg-open").arg(&url_for_spawn).spawn();
+            let _ = tokio::process::Command::new("xdg-open").arg(&url_string).spawn();
         });
     }
 

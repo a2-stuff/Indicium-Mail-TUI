@@ -61,13 +61,13 @@ enum Cmd {
         imap_host: Option<String>,
         #[arg(long, default_value_t = 993)]
         imap_port: u16,
-        #[arg(long, default_value = "implicit")]
+        #[arg(long, default_value = "implicit", value_parser = ["implicit", "starttls", "none"])]
         imap_tls: String,
         #[arg(long)]
         smtp_host: Option<String>,
         #[arg(long, default_value_t = 465)]
         smtp_port: u16,
-        #[arg(long, default_value = "implicit")]
+        #[arg(long, default_value = "implicit", value_parser = ["implicit", "starttls", "none"])]
         smtp_tls: String,
     },
     /// List configured accounts.
@@ -168,14 +168,19 @@ async fn run_mcp(db_path: &std::path::Path) -> anyhow::Result<()> {
     let (engine, mut event_rx) = SyncEngine::new(db.clone());
     let engine = Arc::new(engine);
 
-    // Start account workers for all configured accounts
+    // Start account workers for all configured accounts (in parallel)
     let accounts = imt_store::AccountRepo::new(db.pool()).list().await?;
-    for acc in accounts {
-        let pwd = imt_store::secrets::load(acc.id, "imap_password").unwrap_or_default();
-        if let Err(e) = engine.add_account(acc.clone(), pwd, None).await {
-            tracing::warn!("spawn account worker for {}: {}", acc.address.email, e);
+    let spawn_futures = accounts.into_iter().map(|acc| {
+        let engine = engine.clone();
+        async move {
+            let pwd = imt_store::secrets::load(acc.id, "imap_password").unwrap_or_default();
+            let email = acc.address.email.clone();
+            if let Err(e) = engine.add_account(acc, pwd, None).await {
+                tracing::warn!("spawn account worker for {}: {}", email, e);
+            }
         }
-    }
+    });
+    futures::future::join_all(spawn_futures).await;
 
     // Drain sync events in the background (keeps workers healthy)
     tokio::spawn(async move {
@@ -216,12 +221,17 @@ async fn run_tui(mock: bool, db_path: &std::path::Path, cfg_path: Option<PathBuf
     let engine = Arc::new(engine);
 
     let accounts = imt_store::AccountRepo::new(db.pool()).list().await?;
-    for acc in accounts {
-        let pwd = imt_store::secrets::load(acc.id, "imap_password").unwrap_or_default();
-        if let Err(e) = engine.add_account(acc.clone(), pwd, None).await {
-            tracing::warn!("spawn account worker for {}: {}", acc.address.email, e);
+    let spawn_futures = accounts.into_iter().map(|acc| {
+        let engine = engine.clone();
+        async move {
+            let pwd = imt_store::secrets::load(acc.id, "imap_password").unwrap_or_default();
+            let email = acc.address.email.clone();
+            if let Err(e) = engine.add_account(acc, pwd, None).await {
+                tracing::warn!("spawn account worker for {}: {}", email, e);
+            }
         }
-    }
+    });
+    futures::future::join_all(spawn_futures).await;
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let snap_for_events = snapshot.clone();

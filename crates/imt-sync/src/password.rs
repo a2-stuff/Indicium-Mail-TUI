@@ -44,18 +44,29 @@ pub async fn ensure_fresh_tokens(account: &Account) -> anyhow::Result<()> {
         AuthMethod::OAuth2 { provider, client_id, .. } => (provider.clone(), client_id.clone()),
     };
 
-    // Check cached expiry; only refresh if needed.
-    if let Some(expiry_str) = secrets::load(account.id, "oauth_access_expiry") {
-        if let Ok(expiry) = expiry_str.parse::<i64>() {
-            if chrono::Utc::now().timestamp() + 60 < expiry {
-                return Ok(());
+    // Check cached expiry; only refresh if needed. Treat missing or malformed
+    // expiry as "expired" so we force a refresh.
+    let now = chrono::Utc::now().timestamp();
+    let needs_refresh = match secrets::load(account.id, "oauth_access_expiry") {
+        Some(s) => match s.parse::<i64>() {
+            Ok(exp) => now + 60 >= exp,
+            Err(_) => {
+                tracing::warn!(
+                    "malformed oauth_access_expiry for account {} - forcing refresh",
+                    account.id.0
+                );
+                true
             }
-        }
+        },
+        None => true,
+    };
+    if !needs_refresh {
+        return Ok(());
     }
 
     let refresh_token = secrets::load(account.id, "oauth_refresh_token").ok_or_else(|| {
         anyhow::anyhow!(
-            "OAuth2 account has no refresh token - re-authorize via Accounts manager"
+            "OAuth2 access token expired and no refresh token stored - please re-authenticate the account"
         )
     })?;
 
@@ -65,6 +76,13 @@ pub async fn ensure_fresh_tokens(account: &Account) -> anyhow::Result<()> {
     let tokens = flow.refresh(&refresh_token).await?;
 
     secrets::store(account.id, "oauth_access_token", &tokens.access_token);
+    if tokens.expires_at.timestamp() <= now {
+        tracing::warn!(
+            "refreshed OAuth2 token for account {} has non-future expiry ({})",
+            account.id.0,
+            tokens.expires_at
+        );
+    }
     secrets::store(
         account.id,
         "oauth_access_expiry",

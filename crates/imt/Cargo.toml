@@ -19,6 +19,7 @@ imt-sync = { path = "../imt-sync" }
 imt-tui = { path = "../imt-tui" }
 imt-mcp = { path = "../imt-mcp" }
 tokio.workspace = true
+futures.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -30,3 +31,4 @@ clap = { version = "4", features = ["derive"] }
 rpassword = "7"
 chrono.workspace = true
 uuid.workspace = true
+lru = "0.12"

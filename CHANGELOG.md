@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.18] - 2026-05-04
+
+### Fixed
+- **Optimistic snapshot updates** are now sent to the engine before mutating local state - prevents UI showing a successful move/delete when the engine is shut down.
+- **Toggle flag race**: state is captured before mutation, so concurrent updates can no longer flip the wrong way.
+- **Move with DB delete failure** now propagates the error and triggers a resync instead of leaving an orphan envelope row.
+- **Sent message duplicate**: dropped the local stub envelope; rely on next folder sync to fetch the real envelope. Eliminates the "two copies in Sent" bug after a transient DB error.
+- **OAuth2 expiry edge cases**: missing or malformed `oauth_access_expiry` now forces a refresh rather than silently skipping. Missing refresh token returns a clear "please re-authenticate" error.
+- **Delete with no Trash folder** now returns an error instead of silently dropping the message locally while leaving it on the server.
+- **MCP `read_message`** returns an explicit error if the body fetch returns no content, instead of returning empty `body_text`/`body_html`.
+
+### Added
+- **Body LRU cache**: snapshot's body cache is now bounded to 1000 entries, preventing unbounded memory growth on long-running sessions.
+- **TLS=None warnings** are emitted at IMAP/SMTP connect when plaintext mode is configured.
+- **OAuth2 `state` parameter** added to the auth URL to defend against CSRF; verified on redirect.
+- **MCP transport input size cap** (4 MB per JSON-RPC line) prevents a malformed/malicious client from exhausting memory.
+- **Pre-sorted snapshot messages**: messages are inserted in `internal_date DESC` order; eliminates per-render sort cost in the TUI.
+
+### Changed
+- **DB index** `idx_messages_folder_date` (`folder_id, internal_date DESC`) and `idx_messages_account` for faster `list_by_folder` and per-account scans.
+- **Account workers** spawn in parallel at startup via `join_all` instead of sequentially - cuts startup time on multi-account setups.
+- **Release build profile**: `lto = "fat"`, `panic = "abort"` for ~15-20% smaller binary.
+- **Tokio features trimmed** from `"full"` to the explicit subset the codebase uses.
+- **CLI**: `--imap-tls` and `--smtp-tls` reject invalid values at parse time via clap `value_parser`.
+- **OAuth2 PKCE consolidation**: TUI no longer duplicates verifier/challenge generation - delegates to `imt_net::OAuthFlow`.
+
 ## [0.0.17] - 2026-05-04
 
 ### Added

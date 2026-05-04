@@ -475,6 +475,13 @@ fn parse_full_body(bytes: &[u8]) -> Result<MessageBody> {
 #[async_trait]
 impl MailBackend for ImapBackend {
     async fn connect(&mut self) -> Result<()> {
+        if matches!(self.account.imap.tls, imt_core::Tls::None) {
+            tracing::warn!(
+                target: "imt-net::imap",
+                "IMAP connection to {} is using PLAINTEXT (Tls::None) - credentials transmitted unencrypted",
+                self.account.imap.host
+            );
+        }
         let mut session = self.open_session().await?;
         // Probe IDLE capability once at connect time so later `idle()` calls can
         // pick the push or polling implementation without an extra round-trip.

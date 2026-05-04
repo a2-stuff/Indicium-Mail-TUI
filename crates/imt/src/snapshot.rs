@@ -2,13 +2,15 @@
 //! initial loads from the store. Provides O(1) sync reads for the TUI.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::Result;
 use imt_core::{
     Account, AccountId, Draft, Flag, Folder, FolderId, Message, MessageBody, MessageId, SyncEvent,
 };
 use imt_store::{AccountRepo, Db, DraftRepo, FolderRepo, MessageRepo};
+use lru::LruCache;
 
 /// Read-only snapshot of mail state, shared with the TUI.
 #[derive(Default)]
@@ -16,23 +18,51 @@ pub struct SnapshotInner {
     pub accounts: Vec<Account>,
     pub folders_by_account: HashMap<AccountId, Vec<Folder>>,
     pub messages_by_folder: HashMap<FolderId, Vec<Message>>,
-    pub bodies: HashMap<MessageId, MessageBody>,
     pub drafts: Vec<Draft>,
     pub status: String,
     /// Pending toast notifications for the TUI to drain (errors, new mail, etc).
     pub notifications: VecDeque<String>,
 }
 
+/// Insert a message into a folder vector while preserving the
+/// "newest first" ordering by `internal_date` (ties broken by id).
+pub(crate) fn insert_message_sorted(vec: &mut Vec<Message>, m: Message) {
+    let pos = vec
+        .binary_search_by(|x| m.internal_date.cmp(&x.internal_date))
+        .unwrap_or_else(|p| p);
+    vec.insert(pos, m);
+}
+
 /// Cheap-clone handle to the snapshot.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Snapshot {
     inner: Arc<RwLock<SnapshotInner>>,
+    bodies: Arc<Mutex<LruCache<MessageId, MessageBody>>>,
+}
+
+impl Default for Snapshot {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(SnapshotInner::default())),
+            bodies: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap()))),
+        }
+    }
 }
 
 impl Snapshot {
     /// Construct an empty snapshot.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Look up a cached message body, if any.
+    pub fn get_body(&self, id: MessageId) -> Option<MessageBody> {
+        self.bodies.lock().unwrap().get(&id).cloned()
+    }
+
+    /// Insert a message body into the LRU cache.
+    pub fn put_body(&self, id: MessageId, body: MessageBody) {
+        self.bodies.lock().unwrap().put(id, body);
     }
 
     /// Read with a closure.
@@ -159,29 +189,11 @@ impl Snapshot {
             SyncEvent::MessageBodyFetched { message_id } => {
                 let msg = MessageRepo::new(pool).get(*message_id).await?;
                 if let Some(body) = msg.body.clone() {
-                    self.write(|s| {
-                        s.bodies.insert(*message_id, body);
-                    });
+                    self.put_body(*message_id, body);
                 }
             }
         }
         Ok(())
-    }
-
-    /// Toggle a `Flag::Seen`/`Flag::Flagged` locally without round-tripping
-    /// to the server (the engine command will eventually confirm).
-    pub fn toggle_local_flag(&self, message_id: MessageId, flag: Flag) {
-        self.write(|s| {
-            for msgs in s.messages_by_folder.values_mut() {
-                if let Some(m) = msgs.iter_mut().find(|m| m.id == message_id) {
-                    if let Some(idx) = m.flags.iter().position(|f| f == &flag) {
-                        m.flags.remove(idx);
-                    } else {
-                        m.flags.push(flag.clone());
-                    }
-                }
-            }
-        });
     }
 
     /// Mark a message read locally (idempotent).

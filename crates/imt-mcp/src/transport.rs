@@ -1,6 +1,10 @@
 use std::io::Write;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+/// Maximum allowed length of a single JSON-RPC line on stdin.
+/// Caps memory consumption from a misbehaving / malicious MCP client.
+const MAX_LINE_BYTES: usize = 4 * 1024 * 1024; // 4 MB
+
 pub struct Transport {
     reader: BufReader<tokio::io::Stdin>,
 }
@@ -15,6 +19,12 @@ impl Transport {
         let n = self.reader.read_line(&mut line).await?;
         if n == 0 {
             return Ok(None); // EOF
+        }
+        if n > MAX_LINE_BYTES {
+            return Err(anyhow::anyhow!(
+                "input line exceeds {} byte limit",
+                MAX_LINE_BYTES
+            ));
         }
         Ok(Some(line.trim_end().to_string()))
     }

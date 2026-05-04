@@ -41,7 +41,6 @@ pub enum Command {
     SyncAccount { account: AccountId },
     SyncAll,
     Move { message_id: MessageId, dest_folder: FolderId },
-    Delete { message_id: MessageId },
 }
 
 /// Sync-trait adapter the TUI talks to. All write methods enqueue a `Command`.
@@ -78,13 +77,16 @@ impl DataSource for SyncDataSource {
     fn messages(&self, folder: FolderId) -> Vec<Message> {
         self.snapshot.read(|s| {
             let mut msgs = s.messages_by_folder.get(&folder).cloned().unwrap_or_default();
-            msgs.sort_by(|a, b| b.internal_date.cmp(&a.internal_date));
+            // Defensive: should be a no-op given the pre-sorted invariant maintained
+            // by snapshot inserts. Kept as a fallback against any path that pushes
+            // unsorted (e.g. bulk reloads from the DB whose ordering is trusted).
+            msgs.sort_unstable_by(|a, b| b.internal_date.cmp(&a.internal_date));
             msgs
         })
     }
 
     fn message_body(&self, message: MessageId) -> Option<MessageBody> {
-        let cached = self.snapshot.read(|s| s.bodies.get(&message).cloned());
+        let cached = self.snapshot.get_body(message);
         if cached.is_some() {
             return cached;
         }
@@ -129,15 +131,32 @@ impl DataSource for SyncDataSource {
     }
 
     fn toggle_flag(&self, message: MessageId) {
-        self.snapshot.toggle_local_flag(message, Flag::Flagged);
         let was_flagged = self.snapshot.read(|s| {
             s.messages_by_folder.values().flatten().find(|m| m.id == message)
                 .map(|m| m.flags.contains(&Flag::Flagged)).unwrap_or(false)
         });
-        let _ = self.commands.send(Command::SetFlag { message_id: message, flag: Flag::Flagged, add: was_flagged });
+        let desired = !was_flagged;
+        self.snapshot.write(|s| {
+            for msgs in s.messages_by_folder.values_mut() {
+                if let Some(m) = msgs.iter_mut().find(|m| m.id == message) {
+                    let has = m.flags.contains(&Flag::Flagged);
+                    if desired && !has {
+                        m.flags.push(Flag::Flagged);
+                    } else if !desired && has {
+                        m.flags.retain(|f| f != &Flag::Flagged);
+                    }
+                }
+            }
+        });
+        let _ = self.commands.send(Command::SetFlag { message_id: message, flag: Flag::Flagged, add: desired });
     }
 
     fn move_message(&self, message: MessageId, dest_folder: FolderId) -> anyhow::Result<()> {
+        // Send the engine command first; if the channel is closed we abort
+        // without mutating the snapshot, so the UI stays consistent.
+        self.commands
+            .send(Command::Move { message_id: message, dest_folder })
+            .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
         let src_folder = self.snapshot.read(|s| {
             s.messages_by_folder.iter()
                 .find(|(_, msgs)| msgs.iter().any(|m| m.id == message))
@@ -149,14 +168,12 @@ impl DataSource for SyncDataSource {
                     if let Some(pos) = msgs.iter().position(|m| m.id == message) {
                         let mut m = msgs.remove(pos);
                         m.folder_id = dest_folder;
-                        s.messages_by_folder.entry(dest_folder).or_default().push(m);
+                        let dest = s.messages_by_folder.entry(dest_folder).or_default();
+                        crate::snapshot::insert_message_sorted(dest, m);
                     }
                 }
             });
         }
-        self.commands
-            .send(Command::Move { message_id: message, dest_folder })
-            .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
         Ok(())
     }
 
@@ -171,15 +188,7 @@ impl DataSource for SyncDataSource {
         if let Some(dest) = trash_id {
             return self.move_message(message, dest);
         }
-        self.snapshot.write(|s| {
-            for msgs in s.messages_by_folder.values_mut() {
-                msgs.retain(|m| m.id != message);
-            }
-        });
-        self.commands
-            .send(Command::Delete { message_id: message })
-            .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
-        Ok(())
+        Err(anyhow::anyhow!("No Trash folder configured - cannot delete. Move to a folder instead."))
     }
 
     fn search(&self, query: &str) -> Vec<MessageId> {
@@ -342,7 +351,7 @@ pub async fn command_worker(
             }
             Command::FetchBody(mid) => {
                 match engine.fetch_body(mid).await {
-                    Ok(body) => snapshot.write(|s| { s.bodies.insert(mid, body); }),
+                    Ok(body) => snapshot.put_body(mid, body),
                     Err(e) => snapshot.push_notification(format!("Fetch body failed: {}", e)),
                 }
                 in_flight_bodies.lock().unwrap().remove(&mid);
@@ -368,10 +377,6 @@ pub async fn command_worker(
                 if let Err(e) = engine.move_message(message_id, dest_folder).await {
                     snapshot.push_notification(format!("Move failed: {}", e));
                 }
-            }
-            Command::Delete { message_id } => {
-                let _ = message_id;
-                snapshot.push_notification("No Trash folder found - message kept on server".to_string());
             }
             Command::SyncAll => {
                 let pairs = snapshot.read(|s| {

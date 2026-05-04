@@ -107,6 +107,13 @@ impl SmtpSender {
         bcc: &[Address],
         raw_rfc822: &[u8],
     ) -> Result<()> {
+        if matches!(self.account.smtp.tls, imt_core::Tls::None) {
+            tracing::warn!(
+                target: "imt-net::smtp",
+                "SMTP connection to {} is using PLAINTEXT (Tls::None) - credentials transmitted unencrypted",
+                self.account.smtp.host
+            );
+        }
         let from_lettre = lettre::Address::from_str(&from.email)
             .map_err(|e| NetError::Parse(format!("invalid from address: {}", e)))?;
 
