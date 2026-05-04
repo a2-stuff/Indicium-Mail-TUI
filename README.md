@@ -14,6 +14,10 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 [![IMAP](https://img.shields.io/badge/IMAP-RFC%202177%20IDLE-informational?logo=mail.ru&logoColor=white)]()
 [![SMTP](https://img.shields.io/badge/SMTP-TLS%20%2F%20STARTTLS-informational?logo=mail.ru&logoColor=white)]()
 [![OAuth2](https://img.shields.io/badge/OAuth2-PKCE-success?logo=openid&logoColor=white)]()
+[![MCP](https://img.shields.io/badge/MCP-2024--11--05-blueviolet?logo=anthropic&logoColor=white)](MCP_DOCUMENTATION.md)
+[![Linux](https://img.shields.io/badge/Linux-supported-FCC624?logo=linux&logoColor=black)]()
+[![macOS](https://img.shields.io/badge/macOS-supported-000000?logo=apple&logoColor=white)]()
+[![Windows](https://img.shields.io/badge/Windows-supported-0078D6?logo=windows&logoColor=white)]()
 
 ## Features
 
@@ -36,6 +40,11 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 - Password auth or full OAuth2 (PKCE) - switch auth type inside the modal with `←/→`
 - OAuth2 for Gmail, Microsoft 365, Yahoo Mail, and any custom provider; auth URL opens automatically, token exchange and refresh happen in the background
 - Multi-account support with an account manager (`m`)
+
+**AI agent integration**
+- MCP server (`imt mcp`) - expose your inbox as tools to any MCP-compatible AI agent
+- 12 tools covering the full read/write lifecycle: list, search, read, send, reply, move, flag, delete
+- One-line Claude Desktop config; works with any MCP client
 
 **Other**
 - SQLite local cache with WAL mode - fast reads, no corruption on crash
@@ -148,6 +157,45 @@ Create an app at the Yahoo Developer Console. Use `mail-w` as the scope.
 | Logs | `~/.local/share/indicium-mail-tui/imt.log` |
 
 Set `RUST_LOG=imt_sync=debug,imt_net=debug` for protocol-level traces.
+
+## MCP - AI agent integration
+
+`imt mcp` starts the MCP server on stdin/stdout so any MCP-compatible AI agent can read and manage your email via tool calls.
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "indicium-mail": {
+      "command": "imt",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop - the mail tools appear automatically.
+
+### Available tools
+
+| Tool | What it does |
+|---|---|
+| `list_accounts` | List configured accounts |
+| `list_folders` | List folders for an account |
+| `list_messages` | List messages in a folder (paginated) |
+| `read_message` | Fetch full body, auto-downloads from IMAP if not cached |
+| `search` | Full-text search via SQLite FTS5 |
+| `send` | Send a new email |
+| `reply` | Reply or reply-all to a message |
+| `mark_read` | Mark read or unread |
+| `toggle_flag` | Star / unstar a message |
+| `move_message` | Move to another folder |
+| `delete_message` | Move to Trash |
+
+See [MCP_DOCUMENTATION.md](MCP_DOCUMENTATION.md) for the full protocol reference, parameter schemas, and example agent workflows.
 
 ## Documentation
 
