@@ -298,6 +298,7 @@ impl SyncEngine {
         let src_folder = folder_repo.get(msg.folder_id).await?;
         let dst_folder = folder_repo.get(dest_folder_id).await?;
         let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
+        let was_unread = !msg.flags.contains(&Flag::Seen);
 
         let provider = imap_provider_for(&acc);
         let mut backend = ImapBackend::new(acc, provider);
@@ -315,6 +316,54 @@ impl SyncEngine {
         let _ = self.tx.send(SyncEvent::MessageRemoved {
             folder_id: src_folder.id,
             uid: msg.uid,
+        });
+
+        // Refresh stored counts so the sidebar reflects the move immediately,
+        // even for folders the user hasn't opened yet.
+        if let Ok((src_total, src_unread)) = count_folder(&msg_repo, src_folder.id).await {
+            let _ = folder_repo.update_counts(src_folder.id, src_total, src_unread).await;
+            let _ = self.tx.send(SyncEvent::FolderCountsChanged {
+                folder_id: src_folder.id,
+                total: src_total,
+                unread: src_unread,
+            });
+        }
+        if let Ok((dst_total_db, dst_unread_db)) = count_folder(&msg_repo, dst_folder.id).await {
+            // The moved message isn't in the dst DB yet (IMAP MOVE happened
+            // server-side; we resync the folder later). Add the in-flight one.
+            let dst_total = dst_total_db.saturating_add(1);
+            let dst_unread = if was_unread { dst_unread_db.saturating_add(1) } else { dst_unread_db };
+            let _ = folder_repo.update_counts(dst_folder.id, dst_total, dst_unread).await;
+            let _ = self.tx.send(SyncEvent::FolderCountsChanged {
+                folder_id: dst_folder.id,
+                total: dst_total,
+                unread: dst_unread,
+            });
+        }
+        Ok(())
+    }
+
+    /// Hard-delete every message in `folder` by issuing IMAP `STORE \Deleted`
+    /// for all UIDs and EXPUNGE-ing. Clears local state too. Intended for the
+    /// Trash folder; the caller is responsible for that policy.
+    pub async fn empty_trash(&self, folder_id: FolderId) -> Result<()> {
+        let msg_repo = MessageRepo::new(self.db.pool());
+        let folder_repo = FolderRepo::new(self.db.pool());
+        let folder = folder_repo.get(folder_id).await?;
+        let acc = AccountRepo::new(self.db.pool()).get(folder.account_id).await?;
+
+        let provider = imap_provider_for(&acc);
+        let mut backend = ImapBackend::new(acc, provider);
+        backend.connect().await?;
+        backend.expunge_folder(&folder.path).await?;
+        let _ = backend.disconnect().await;
+
+        msg_repo.delete_by_folder(folder_id).await?;
+        let _ = folder_repo.update_counts(folder_id, 0, 0).await;
+        let _ = self.tx.send(SyncEvent::FolderCountsChanged {
+            folder_id,
+            total: 0,
+            unread: 0,
         });
         Ok(())
     }
@@ -461,6 +510,16 @@ async fn find_sent_folder(db: &Db, account_id: AccountId) -> Option<imt_core::Fo
                 .find(|f| f.path.eq_ignore_ascii_case("Sent") || f.path.contains("Sent"))
         })
         .cloned()
+}
+
+/// Count total and unread messages currently stored locally for a folder.
+async fn count_folder(repo: &MessageRepo<'_>, folder_id: FolderId) -> Result<(u32, u32)> {
+    // 10_000 is well above any folder we expect to display; if it ever isn't,
+    // the next full sync will reset counts authoritatively from the server.
+    let msgs = repo.list_by_folder(folder_id, 10_000, 0).await?;
+    let total = msgs.len() as u32;
+    let unread = msgs.iter().filter(|m| !m.flags.contains(&Flag::Seen)).count() as u32;
+    Ok((total, unread))
 }
 
 #[allow(dead_code)]

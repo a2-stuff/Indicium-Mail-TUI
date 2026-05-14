@@ -985,6 +985,7 @@ impl App {
             KeyAction::ReplyAll => self.start_reply(true),
             KeyAction::Forward => self.start_forward(),
             KeyAction::Delete => self.delete_current(),
+            KeyAction::EmptyTrash => self.empty_trash_current(),
             KeyAction::ToggleFlag => self.toggle_flag(),
             KeyAction::MarkRead => self.mark_read(),
             KeyAction::Search => {
@@ -1689,6 +1690,24 @@ impl App {
                 self.refresh_messages();
             }
             Err(e) => self.set_status(format!("Delete failed: {e}")),
+        }
+    }
+
+    fn empty_trash_current(&mut self) {
+        let folder = match self.current_folder() {
+            Some(f) => f.clone(),
+            None => return,
+        };
+        if folder.role != imt_core::FolderRole::Trash {
+            self.set_status("Empty Trash only works inside the Trash folder");
+            return;
+        }
+        match self.data.empty_trash(folder.id) {
+            Ok(()) => {
+                self.set_status("Emptying Trash...");
+                self.refresh_messages();
+            }
+            Err(e) => self.set_status(format!("Empty Trash failed: {e}")),
         }
     }
 

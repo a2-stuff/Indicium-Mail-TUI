@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.19] - 2026-05-14
+
+### Fixed
+- **Sidebar unread/total counts stayed stale after a move or delete in folders the user had not opened.** The sync engine now recomputes message and unread counts for both the source and destination folder after every `move_message`, persists them via `FolderRepo::update_counts`, and emits `FolderCountsChanged` for each. The sidebar updates everywhere immediately, not just for the currently loaded folder.
+
+### Added
+- **Empty Trash**: press `Shift+E` while viewing the Trash folder to permanently delete every message in it. Refuses to run outside Trash.
+- New `MailBackend::expunge_folder` trait method and IMAP implementation (`UID STORE 1:* +FLAGS \Deleted` followed by `EXPUNGE`).
+- `SyncEngine::empty_trash(folder_id)` plumbed through `Command::EmptyTrash` and a new `DataSource::empty_trash` hook. Optimistically clears the snapshot before the IMAP round-trip.
+- `MessageRepo::delete_by_folder` for the local-side cleanup.
+
 ## [0.0.18] - 2026-05-04
 
 ### Fixed

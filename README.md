@@ -124,6 +124,7 @@ Global flags: `--db <path>`, `--config <path>`, `--log-file <path>`.
 | `u` | toggle read/unread |
 | `m` | account manager |
 | `d` | delete (moves to Trash) |
+| `E` | empty Trash (only in Trash folder) |
 | `v` | move to folder |
 | `o` | view HTML body inline (reader pane) |
 | `a` | attachment viewer (reader pane) |

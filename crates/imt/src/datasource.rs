@@ -41,6 +41,7 @@ pub enum Command {
     SyncAccount { account: AccountId },
     SyncAll,
     Move { message_id: MessageId, dest_folder: FolderId },
+    EmptyTrash { folder: FolderId },
 }
 
 /// Sync-trait adapter the TUI talks to. All write methods enqueue a `Command`.
@@ -174,6 +175,24 @@ impl DataSource for SyncDataSource {
                 }
             });
         }
+        Ok(())
+    }
+
+    fn empty_trash(&self, folder: FolderId) -> anyhow::Result<()> {
+        // Optimistic: clear local snapshot immediately so the UI reflects the
+        // empty trash without waiting for the IMAP round-trip.
+        self.snapshot.write(|s| {
+            s.messages_by_folder.insert(folder, Vec::new());
+            for fs in s.folders_by_account.values_mut() {
+                if let Some(f) = fs.iter_mut().find(|f| f.id == folder) {
+                    f.message_count = 0;
+                    f.unread_count = 0;
+                }
+            }
+        });
+        self.commands
+            .send(Command::EmptyTrash { folder })
+            .map_err(|_| anyhow::anyhow!("engine channel closed"))?;
         Ok(())
     }
 
@@ -376,6 +395,13 @@ pub async fn command_worker(
             Command::Move { message_id, dest_folder } => {
                 if let Err(e) = engine.move_message(message_id, dest_folder).await {
                     snapshot.push_notification(format!("Move failed: {}", e));
+                }
+            }
+            Command::EmptyTrash { folder } => {
+                if let Err(e) = engine.empty_trash(folder).await {
+                    snapshot.push_notification(format!("Empty Trash failed: {}", e));
+                } else {
+                    snapshot.push_notification("Trash emptied".to_string());
                 }
             }
             Command::SyncAll => {

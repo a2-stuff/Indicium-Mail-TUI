@@ -41,6 +41,7 @@ pub fn render(f: &mut Frame, full: Rect) {
         ("s", "★ mark / unmark important"),
         ("v", "move to folder"),
         ("d", "delete (moves to Trash)"),
+        ("E", "empty Trash (only in Trash folder)"),
         ("/", "search"),
         ("o", "open HTML body in browser"),
         ("A", "add account (sidebar focus)"),

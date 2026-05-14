@@ -733,6 +733,28 @@ impl MailBackend for ImapBackend {
         Ok(())
     }
 
+    async fn expunge_folder(&mut self, folder: &str) -> Result<()> {
+        let mut guard = self.session.lock().await;
+        let session = guard.as_mut_owned()?;
+        session
+            .select(folder)
+            .await
+            .map_err(|e| NetError::Protocol(format!("select {}: {}", folder, e)))?;
+        let stream = session
+            .uid_store("1:*", "+FLAGS.SILENT (\\Deleted)")
+            .await
+            .map_err(|e| NetError::Protocol(format!("store deleted (all): {}", e)))?;
+        let _: Vec<_> = stream
+            .try_collect()
+            .await
+            .map_err(|e| NetError::Protocol(format!("store drain: {}", e)))?;
+        let _stream = session
+            .expunge()
+            .await
+            .map_err(|e| NetError::Protocol(format!("expunge: {}", e)))?;
+        Ok(())
+    }
+
     async fn idle(&mut self, folder: &str) -> Result<IdleHandle> {
         // SELECT first so the IDLE applies to the right mailbox.
         {

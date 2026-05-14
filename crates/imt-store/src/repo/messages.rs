@@ -163,6 +163,16 @@ impl<'a> MessageRepo<'a> {
         Ok(())
     }
 
+    /// Delete every message stored locally for a folder.
+    pub async fn delete_by_folder(&self, folder_id: FolderId) -> Result<()> {
+        let folder_bytes = uuid_bytes(&folder_id.0);
+        sqlx::query("DELETE FROM messages WHERE folder_id = ?1")
+            .bind(&folder_bytes)
+            .execute(self.0)
+            .await?;
+        Ok(())
+    }
+
     /// Delete a message identified by `(folder, uid)`.
     pub async fn delete_by_uid(&self, folder_id: FolderId, uid: Uid) -> Result<()> {
         let folder_bytes = uuid_bytes(&folder_id.0);

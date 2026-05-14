@@ -67,9 +67,10 @@ Event-driven sync engine.
   5. enters IDLE on the inbox; on `EXISTS`/`EXPUNGE`/`FETCH` re-syncs and re-enters
 - Exponential backoff (5s -> 5min) on connection errors
 - `password.rs`: `imap_provider_for(&account)` and `smtp_provider_for(&account)` return auth-method-aware `PasswordProvider` closures (load `imap_password` for password accounts, `oauth_access_token` for OAuth2 accounts); `ensure_fresh_tokens()` handles silent token refresh - missing or malformed `oauth_access_expiry` is treated as expired (forces refresh); a missing refresh token returns an explicit `"please re-authenticate the account"` error.
-- `move_message`: on server move success but DB delete failure, the error propagates to the caller and a `SyncFinished` event is emitted to schedule reconciliation.
+- `move_message`: on server move success but DB delete failure, the error propagates to the caller and a `SyncFinished` event is emitted to schedule reconciliation. After a successful move, recomputes total/unread counts for both the source and destination folder from the local message table, persists them via `FolderRepo::update_counts`, and emits `FolderCountsChanged` for each so the sidebar reflects the move in every folder immediately (not only the one currently loaded).
+- `empty_trash(folder_id)`: marks every UID in the folder `\Deleted` via the new `MailBackend::expunge_folder` method (IMAP `UID STORE 1:* +FLAGS \Deleted` + `EXPUNGE`), then calls `MessageRepo::delete_by_folder` and emits `FolderCountsChanged { total: 0, unread: 0 }`. The TUI binds this to `Shift+E` and refuses to run unless the current folder's role is `Trash`.
 - `send`: relies on the next folder sync to fetch the canonical Sent envelope from IMAP rather than inserting a `UID(0)` stub locally - eliminates the duplicate-row bug after a transient DB error.
-- Public methods: `add_account(account, password, oauth_exchange)`, `remove_account`, `sync_folder`, `fetch_body`, `send`, `shutdown`
+- Public methods: `add_account(account, password, oauth_exchange)`, `remove_account`, `sync_folder`, `fetch_body`, `send`, `move_message`, `empty_trash`, `shutdown`
 
 `OAuthExchange` (in `engine.rs`): `{ client_id, client_secret, code, verifier, redirect_uri }` - passed through from the TUI onboarding form when saving an OAuth2 account; the engine performs the async HTTP code exchange and stores resulting tokens in secrets.
 

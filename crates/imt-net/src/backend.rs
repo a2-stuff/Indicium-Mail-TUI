@@ -178,6 +178,10 @@ pub trait MailBackend: Send {
         dest_folder: &str,
     ) -> Result<()>;
 
+    /// Hard-delete every message in `folder` by marking all UIDs `\Deleted`
+    /// and issuing EXPUNGE. Used for "empty trash".
+    async fn expunge_folder(&mut self, folder: &str) -> Result<()>;
+
     /// Begin an IDLE session against `folder`. Falls back to polling if the
     /// server does not advertise IDLE.
     async fn idle(&mut self, folder: &str) -> Result<IdleHandle>;

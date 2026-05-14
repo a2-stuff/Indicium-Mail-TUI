@@ -53,6 +53,11 @@ pub trait DataSource: Send + Sync {
     fn delete_message(&self, _message: MessageId) -> anyhow::Result<()> {
         Ok(())
     }
+    /// Permanently delete every message in `folder` (intended for Trash).
+    /// Default: no-op.
+    fn empty_trash(&self, _folder: FolderId) -> anyhow::Result<()> {
+        Ok(())
+    }
     /// Trigger a sync. `None` arguments mean "all". Default: no-op.
     fn refresh(&self, _account: Option<AccountId>, _folder: Option<FolderId>) {}
     /// Current backend status string (e.g. "syncing", "idle", "connecting").
@@ -228,6 +233,18 @@ impl DataSource for InMemoryDataSource {
             }
             Ok(())
         }
+    }
+
+    fn empty_trash(&self, folder: FolderId) -> anyhow::Result<()> {
+        let mut store = self.inner.lock().unwrap();
+        store.messages.insert(folder, Vec::new());
+        if let Some(fs) = store.folders.values_mut().find(|fs| fs.iter().any(|f| f.id == folder)) {
+            if let Some(f) = fs.iter_mut().find(|f| f.id == folder) {
+                f.message_count = 0;
+                f.unread_count = 0;
+            }
+        }
+        Ok(())
     }
 
     fn toggle_flag(&self, message: MessageId) {
