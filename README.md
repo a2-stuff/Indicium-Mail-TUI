@@ -166,6 +166,13 @@ the reply uses the email/thread plus your typed notes plus that instruction.
 (`Ctrl-Shift-G` does the same on terminals with the enhanced keyboard protocol -
 kitty, foot, WezTerm, ghostty, recent xterm - but `Ctrl-T` works everywhere.)
 
+If the instruction asks the AI to **create a file** (a text/CSV/Excel/PDF/image/
+ZIP, etc.), it is generated in the background and **attached to the draft
+automatically** - e.g. "draft a summary and attach it as a CSV", or "generate a
+chart of these numbers as a PNG and attach it". The status line shows how many
+files were attached. (Requires the Claude provider, which is run with its file
+tools enabled in an isolated working directory.)
+
 In attachment viewer: `j/k` or arrows scroll, `Enter` or `v` view inline, `s` save to disk, `Esc`/`q` close.
 
 In HTML viewer: `j/k` or arrows scroll, `o`/`Esc`/`q` close.
@@ -229,8 +236,8 @@ Restart Claude Desktop - the mail tools appear automatically.
 | `list_messages` | List messages in a folder (paginated) |
 | `read_message` | Fetch full body, auto-downloads from IMAP if not cached |
 | `search` | Full-text search via SQLite FTS5 |
-| `send` | Send a new email |
-| `reply` | Reply or reply-all to a message |
+| `send` | Send a new email (supports an `attachments` list of file paths) |
+| `reply` | Reply or reply-all to a message (supports an `attachments` list of file paths) |
 | `mark_read` | Mark read or unread |
 | `toggle_flag` | Star / unstar a message |
 | `move_message` | Move to another folder |

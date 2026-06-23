@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-23
+
+### Added
+- **AI reply can create and attach files.** When you ask the AI reply (e.g. via the `Ctrl-T` instruction dialog) to generate a file - a text/CSV/Excel/PDF/image/ZIP, etc. - the background model now runs in an isolated working directory and writes any final files into an `attachments/` folder; those files are automatically attached to the compose draft when the reply is inserted. The Claude provider runs with the file tools (Read/Write/Edit/Bash) auto-approved so it can write and run a small script to produce real binary files. The status line reports how many files were attached. The reply body no longer dumps the on-disk file path.
+- **MCP `send` and `reply` accept an `attachments` parameter.** Any MCP agent can attach files it created by passing a list of local file paths (or `{path, filename}` objects); the MIME type is inferred from the extension. Nonexistent paths return a clear error so the agent can correct them. This is the programmatic equivalent of the in-app auto-attach, for headless agent workflows.
+
 ## [0.3.1] - 2026-06-23
 
 ### Changed

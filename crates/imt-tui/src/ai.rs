@@ -5,6 +5,7 @@
 //! modal. Runs off the UI thread via `tokio::spawn`; the result is delivered
 //! through a `std::sync::mpsc` channel the app polls each tick.
 
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
@@ -13,8 +14,15 @@ use imt_core::MessageBody;
 
 use crate::settings::AiProvider;
 
+/// A generated reply: the drafted body text plus any files the model created in
+/// its working `attachments/` directory (to be attached to the email).
+pub struct AiReply {
+    pub text: String,
+    pub attachments: Vec<PathBuf>,
+}
+
 /// Result of a background generation: the drafted reply, or an error message.
-pub type AiResult = Result<String, String>;
+pub type AiResult = Result<AiReply, String>;
 
 /// Everything the model needs to draft a reply.
 pub struct ReplyContext {
@@ -88,6 +96,19 @@ while still respecting the email thread above:\n--- INSTRUCTION ---\n",
         p.push_str(ctx.instruction.trim());
         p.push_str("\n--- END INSTRUCTION ---");
     }
+
+    // File attachments: any final file dropped in ./attachments/ is attached to
+    // the email automatically. Only relevant if the request asks for a file.
+    p.push_str(
+        "\n\nATTACHMENTS: If the instruction or notes ask you to create, generate, or attach \
+a file (text, CSV, Excel .xlsx, PDF, image .png/.jpg, ZIP, etc.), write each FINAL file you \
+want attached into the ./attachments/ directory of your current working directory (it already \
+exists). Use the rest of the working directory for any scratch/intermediate work - only files \
+in ./attachments/ are attached. You may write and run scripts to produce real binary files \
+(e.g. a Python script to render a PNG or build an .xlsx). Do NOT mention file paths in the \
+reply body; still output ONLY the reply body text on stdout. If no file was requested, create \
+nothing and just write the reply.",
+    );
     p
 }
 
@@ -108,6 +129,18 @@ async fn run_cli(provider: AiProvider, model: &str, prompt: &str) -> AiResult {
     let model = model.trim();
     let mut cmd = Command::new(bin);
 
+    // Fresh, isolated working directory for this run. The model writes any files
+    // to attach into <workdir>/attachments/; we scan that afterwards. Using a
+    // dedicated temp dir also means the CLI never picks up a project-local
+    // context file (e.g. CLAUDE.md) from wherever `imt` was launched.
+    let workdir = std::env::temp_dir().join(format!(
+        "imt-ai-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let attach_dir = workdir.join("attachments");
+    let _ = std::fs::create_dir_all(&attach_dir);
+
     // Non-interactive, single-shot invocation per provider. The prompt is passed
     // as one argv entry (no shell, so newlines/quotes are safe).
     match provider {
@@ -116,6 +149,12 @@ async fn run_cli(provider: AiProvider, model: &str, prompt: &str) -> AiResult {
             // servers, so a one-shot reply doesn't pay the cost of connecting
             // to every MCP server in the user's global config.
             cmd.arg("-p").arg("--strict-mcp-config");
+            // Auto-approve the tools needed to create files (write a script,
+            // run it, save the output) so file generation works unattended in
+            // this isolated working directory.
+            cmd.arg("--permission-mode").arg("acceptEdits");
+            cmd.arg("--allowedTools")
+                .arg("Read Write Edit Bash Glob Grep");
             if !model.is_empty() {
                 cmd.arg("--model").arg(model);
             }
@@ -136,9 +175,7 @@ async fn run_cli(provider: AiProvider, model: &str, prompt: &str) -> AiResult {
         }
     }
 
-    // Run in a neutral directory so the CLI does not pick up a project-local
-    // context file (e.g. CLAUDE.md) from wherever `imt` was launched.
-    cmd.current_dir(std::env::temp_dir())
+    cmd.current_dir(&workdir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -207,7 +244,33 @@ async fn run_cli(provider: AiProvider, model: &str, prompt: &str) -> AiResult {
             format!("{bin}: {short}")
         });
     }
-    Ok(normalize_reply(&strip_fences(&text)))
+    Ok(AiReply {
+        text: normalize_reply(&strip_fences(&text)),
+        attachments: collect_attachments(&attach_dir),
+    })
+}
+
+/// Collect the files the model left in its `attachments/` directory, to attach
+/// to the email. Top-level files only (skips subdirectories and dotfiles).
+fn collect_attachments(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
+        let hidden = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.starts_with('.'))
+            .unwrap_or(true);
+        if is_file && !hidden {
+            out.push(path);
+        }
+    }
+    out.sort();
+    out
 }
 
 /// Tidy model output into human spacing: trim trailing whitespace on each line

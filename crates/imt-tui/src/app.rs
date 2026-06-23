@@ -846,7 +846,7 @@ impl App {
                     // notes aren't duplicated; keep the quoted thread below it.
                     let body_text = c.body.lines().join("\n");
                     let (_notes, quoted) = crate::ai::split_notes_and_quote(&body_text);
-                    let mut new_body = reply.trim().to_string();
+                    let mut new_body = reply.text.trim().to_string();
                     if !quoted.trim().is_empty() {
                         new_body.push_str("\n\n");
                         new_body.push_str(quoted.trim_start_matches('\n'));
@@ -854,7 +854,32 @@ impl App {
                     c.field = ComposeField::Body;
                     c.set_body_text(&new_body);
                     c.rewrap_body();
-                    self.set_status("AI reply inserted");
+                    // Attach any files the model generated.
+                    let mut added = 0;
+                    for path in &reply.attachments {
+                        if c.draft.attachments.iter().any(|a| &a.path == path) {
+                            continue;
+                        }
+                        let filename = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("file")
+                            .to_string();
+                        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                        let mime_type = mime_for_path(path);
+                        c.draft.attachments.push(imt_core::draft::DraftAttachment {
+                            filename,
+                            mime_type,
+                            path: path.clone(),
+                            size,
+                        });
+                        added += 1;
+                    }
+                    if added > 0 {
+                        self.set_status(format!("AI reply inserted ({added} file(s) attached)"));
+                    } else {
+                        self.set_status("AI reply inserted");
+                    }
                 } else {
                     self.set_status("AI reply ready (compose closed)");
                 }

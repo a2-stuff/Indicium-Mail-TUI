@@ -48,8 +48,8 @@ Restart the host; the mail tools appear automatically. (You can also run
 | `list_messages` | Messages in a folder (paginated): subject, from, date, snippet, flags. |
 | `read_message` | Full body of a message (auto-downloads from IMAP if needed). |
 | `search` | Full-text search across cached messages. |
-| `send` | Send a new email. |
-| `reply` | Reply / reply-all to a message (correct threading headers). |
+| `send` | Send a new email. Pass `attachments` (a list of local file paths) to attach files. |
+| `reply` | Reply / reply-all to a message (correct threading headers). Pass `attachments` (a list of local file paths) to attach files you generated. |
 | `mark_read` | Mark read / unread. |
 | `toggle_flag` | Star / unstar. |
 | `move_message` | Move to another folder. |

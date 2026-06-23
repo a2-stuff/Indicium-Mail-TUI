@@ -151,8 +151,9 @@ Send a new email.
 | `body` | string | yes | Plain-text body |
 | `cc` | string | no | CC recipients, comma-separated |
 | `bcc` | string | no | BCC recipients, comma-separated |
+| `attachments` | array | no | Local file paths to attach. Each item is a path string, or an object `{path, filename}`. The file must exist and be readable; MIME type is inferred from the extension. |
 
-**Returns:** `"Message sent successfully"` or error.
+**Returns:** `"Message sent successfully"` (with attachment count when any) or error.
 
 ---
 
@@ -165,8 +166,9 @@ Reply to a message.
 | `message_id` | string (UUID) | yes | Message to reply to |
 | `body` | string | yes | Reply body |
 | `reply_all` | boolean | no | Reply to all recipients (default false) |
+| `attachments` | array | no | Local file paths to attach to the reply. Each item is a path string, or an object `{path, filename}`. The file must exist and be readable; MIME type is inferred from the extension. |
 
-**Returns:** `"Reply sent successfully"` or error.
+**Returns:** `"Reply sent successfully"` (with attachment count when any) or error.
 
 ---
 
