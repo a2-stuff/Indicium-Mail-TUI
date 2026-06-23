@@ -447,6 +447,18 @@ pub struct App {
     pub ui_main: ratatui::layout::Rect,
     /// Active pane-divider drag (1 = sidebar|list, 2 = list|reader).
     pub pane_drag: Option<u8>,
+    /// Thread view state, when open.
+    pub thread_state: Option<ThreadState>,
+    /// Number of messages in the current message's thread (>=1); drives the
+    /// reader's thread hint. 0 = not computed / no message.
+    pub current_thread_count: usize,
+}
+
+/// Thread (conversation) view modal state.
+pub struct ThreadState {
+    pub messages: Vec<Message>,
+    pub selected: usize,
+    pub scroll: u16,
 }
 
 /// Settings modal state.
@@ -723,6 +735,8 @@ impl App {
             ui_frame: ratatui::layout::Rect::default(),
             ui_main: ratatui::layout::Rect::default(),
             pane_drag: None,
+            thread_state: None,
+            current_thread_count: 0,
         };
         app.refresh_messages();
         if app.accounts.is_empty() {
@@ -895,6 +909,8 @@ impl App {
             .current_message()
             .and_then(|m| self.data.message_body(m.id).or_else(|| m.body.clone()));
         self.reader_scroll = 0;
+        let cur = self.current_message().map(|m| m.id);
+        self.current_thread_count = cur.map(|id| self.data.thread(id).len()).unwrap_or(0);
     }
 
     /// Periodic tick (every 250ms). Pulls fresh state from the data source so
@@ -1276,7 +1292,28 @@ impl App {
             KeyAction::AttachmentClose => self.attachment_close(),
             KeyAction::AiGenerateReply => self.ai_generate_reply(),
             KeyAction::OpenMenu => self.open_menu(),
+            KeyAction::OpenThread => self.open_thread(),
+            KeyAction::CloseThread => {
+                self.thread_state = None;
+                self.mode = Mode::Normal;
+            }
         }
+    }
+
+    /// Open the thread (conversation) view for the selected message.
+    fn open_thread(&mut self) {
+        let id = match self.current_message() {
+            Some(m) => m.id,
+            None => return,
+        };
+        let messages = self.data.thread(id);
+        if messages.len() <= 1 {
+            self.set_status("No other messages in this conversation");
+            return;
+        }
+        let selected = messages.iter().position(|m| m.id == id).unwrap_or(0);
+        self.thread_state = Some(ThreadState { messages, selected, scroll: 0 });
+        self.mode = Mode::Thread;
     }
 
     /// Handle a raw mouse event (drag panes in normal mode, move/resize the
@@ -2023,6 +2060,15 @@ impl App {
     }
 
     fn move_up(&mut self) {
+        if self.mode == Mode::Thread {
+            if let Some(t) = self.thread_state.as_mut() {
+                if t.selected > 0 {
+                    t.selected -= 1;
+                    t.scroll = 0;
+                }
+            }
+            return;
+        }
         if self.mode == Mode::HtmlViewer {
             if let Some((_, scroll)) = self.html_viewer.as_mut() {
                 *scroll = scroll.saturating_sub(1);
@@ -2073,6 +2119,15 @@ impl App {
     }
 
     fn move_down(&mut self) {
+        if self.mode == Mode::Thread {
+            if let Some(t) = self.thread_state.as_mut() {
+                if t.selected + 1 < t.messages.len() {
+                    t.selected += 1;
+                    t.scroll = 0;
+                }
+            }
+            return;
+        }
         if self.mode == Mode::HtmlViewer {
             if let Some((_, scroll)) = self.html_viewer.as_mut() {
                 *scroll = scroll.saturating_add(1);
@@ -2151,6 +2206,16 @@ impl App {
     }
 
     fn page(&mut self, delta: i32) {
+        if self.mode == Mode::Thread {
+            if let Some(t) = self.thread_state.as_mut() {
+                if delta < 0 {
+                    t.scroll = t.scroll.saturating_sub((-delta) as u16);
+                } else {
+                    t.scroll = t.scroll.saturating_add(delta as u16);
+                }
+            }
+            return;
+        }
         match self.focus {
             Focus::MessageList => {
                 let new = (self.message_idx as i32 + delta).clamp(0, self.messages.len().saturating_sub(1) as i32) as usize;

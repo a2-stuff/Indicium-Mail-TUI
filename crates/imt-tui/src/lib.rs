@@ -11,6 +11,7 @@ pub mod quote;
 pub mod run;
 pub mod settings;
 pub mod theme;
+pub mod thread;
 pub mod ui;
 
 pub use app::App;

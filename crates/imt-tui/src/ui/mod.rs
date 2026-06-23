@@ -16,6 +16,7 @@ pub mod search;
 pub mod settings;
 pub mod sidebar;
 pub mod status;
+pub mod thread;
 pub mod toast;
 
 use ratatui::Frame;
@@ -70,6 +71,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if app.mode == Mode::AttachmentViewer {
         attachment_viewer::render(f, f.area(), app);
+    }
+    if app.mode == Mode::Thread {
+        thread::render(f, f.area(), app);
     }
     if app.mode == Mode::HtmlViewer {
         if let Some((ref content, scroll)) = app.html_viewer {

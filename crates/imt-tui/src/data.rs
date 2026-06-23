@@ -20,6 +20,12 @@ pub trait DataSource: Send + Sync {
     fn messages(&self, folder: FolderId) -> Vec<Message>;
     /// Full body for a message, fetched on demand.
     fn message_body(&self, message: MessageId) -> Option<MessageBody>;
+    /// All messages in the same conversation as `message`, oldest-first.
+    /// Default returns just the message itself (no threading).
+    fn thread(&self, message: MessageId) -> Vec<Message> {
+        let _ = message;
+        Vec::new()
+    }
     /// Persist a draft.
     fn save_draft(&self, draft: &Draft) -> anyhow::Result<()>;
     /// Send a draft via the corresponding account.
@@ -162,6 +168,13 @@ impl DataSource for InMemoryDataSource {
     fn message_body(&self, message: MessageId) -> Option<MessageBody> {
         let store = self.inner.lock().unwrap();
         store.bodies.get(&message).cloned()
+    }
+
+    fn thread(&self, message: MessageId) -> Vec<Message> {
+        let store = self.inner.lock().unwrap();
+        let all: Vec<Message> = store.messages.values().flatten().cloned().collect();
+        drop(store);
+        crate::thread::collect_thread(&all, message)
     }
 
     fn save_draft(&self, draft: &Draft) -> anyhow::Result<()> {

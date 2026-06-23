@@ -25,6 +25,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::FilePicker => "FILES",
         Mode::AttachmentViewer => "ATTACHMENTS",
         Mode::HtmlViewer => "HTML",
+        Mode::Thread => "THREAD",
     };
     let hints = match app.mode {
         Mode::Normal => "[↑↓] move  [Enter] open  [Tab] pane  │  [c] compose  [r] reply  [a] attachments  │  [/] search  [F10] menu  [?] help  [q] quit",
@@ -40,6 +41,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::FilePicker => "[↑↓] move  [Space] select  [Enter] confirm  [Backspace] up  [Esc] cancel",
         Mode::AttachmentViewer => "[↑↓] navigate  [Enter] view  [s] save  [Esc] close",
         Mode::HtmlViewer => "[↑↓] scroll  [o / Esc] close",
+        Mode::Thread => "[↑↓] select message  [PgUp/PgDn] scroll  [Esc] close",
     };
     let (sync_text, sync_style) = if app.is_busy() {
         (format!(" {} {} ", app.spinner_frame(), app.backend_status), theme::accent())

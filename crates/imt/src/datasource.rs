@@ -98,6 +98,15 @@ impl DataSource for SyncDataSource {
         None
     }
 
+    fn thread(&self, message: MessageId) -> Vec<Message> {
+        // Gather messages across all loaded folders so replies in Sent (etc.)
+        // group with the original.
+        let all: Vec<Message> = self
+            .snapshot
+            .read(|s| s.messages_by_folder.values().flatten().cloned().collect());
+        imt_tui::thread::collect_thread(&all, message)
+    }
+
     fn save_draft(&self, draft: &Draft) -> Result<()> {
         self.commands.send(Command::SaveDraft(draft.clone()))
             .map_err(|_| anyhow::anyhow!("engine channel closed"))?;

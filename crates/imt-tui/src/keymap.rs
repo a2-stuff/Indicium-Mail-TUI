@@ -18,6 +18,7 @@ pub enum Mode {
     Compose,
     Search,
     Help,
+    Thread,
     Onboarding,
     Settings,
     Accounts,
@@ -196,6 +197,8 @@ pub enum KeyAction {
     CloseHtmlViewer,
     AiGenerateReply,
     OpenMenu,
+    OpenThread,
+    CloseThread,
 }
 
 /// Translate a key event to a `KeyAction` in normal mode (compose mode handled separately).
@@ -205,6 +208,7 @@ pub fn map_key(focus: Focus, mode: Mode, key: KeyEvent) -> Option<KeyAction> {
         Mode::Menu => None,
         Mode::Compose => map_compose(key),
         Mode::Help => map_help(key),
+        Mode::Thread => map_thread(key),
         Mode::Search => map_search(key),
         Mode::Normal => map_normal(focus, key),
         Mode::Onboarding => map_onboarding(key),
@@ -303,6 +307,18 @@ fn map_normal(focus: Focus, key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('m') => Some(KeyAction::OpenAccounts),
         KeyCode::Char('i') => Some(KeyAction::OpenInfo),
         KeyCode::Char('a') if focus == Focus::Reader => Some(KeyAction::OpenAttachments),
+        KeyCode::Char('t') => Some(KeyAction::OpenThread),
+        _ => None,
+    }
+}
+
+fn map_thread(key: KeyEvent) -> Option<KeyAction> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('t') => Some(KeyAction::CloseThread),
+        KeyCode::Up | KeyCode::Char('k') => Some(KeyAction::Up),
+        KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Down),
+        KeyCode::PageUp => Some(KeyAction::PageUp),
+        KeyCode::PageDown => Some(KeyAction::PageDown),
         _ => None,
     }
 }

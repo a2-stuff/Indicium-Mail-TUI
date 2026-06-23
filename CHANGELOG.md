@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-23
+
+### Added
+- **Conversation thread view** (`t`): opens a modal showing every message in the conversation - including replies that live in other folders such as Sent - with the selected message's body below. Threads are reconstructed on demand from `Message-ID` / `In-Reply-To` / `References` (with a normalized-subject fallback), since `thread_id` is not populated by the sync engine. The reader shows a "Thread: N messages - press [t] to view" hint when the current message has a conversation. New `DataSource::thread()` gathers messages across all loaded folders.
+- **Shareable Claude Code skill** (`.claude/skills/indicium-mail`): lets anyone who clones the repo use the mailbox through the `imt mcp` tools (read / search / reply / send / triage), with setup and operating rules.
+
 ## [0.1.1] - 2026-06-23
 
 ### Fixed

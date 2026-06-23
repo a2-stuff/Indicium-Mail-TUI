@@ -42,6 +42,7 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 
 **Reading**
 - Three-pane layout: account/folder sidebar, message list, reader
+- Conversation thread view (`t`): see the whole conversation - including replies in other folders (e.g. Sent) - grouped by Message-ID / References, with a subject fallback
 - HTML bodies rendered inline via `html2text` - no browser needed
 - Attachment viewer (centered modal): images rendered inline as truecolor half-blocks (works over SSH, no graphics protocol needed), PDF and Word (.docx) shown as extracted text, text/code/markdown inline; other binaries identified by MIME type and saved to disk
 - Resizable, draggable UI: drag pane dividers to resize the account/inbox/reading panes; drag the compose window to move/resize it - all remembered across restarts
@@ -122,6 +123,7 @@ Global flags: `--db <path>`, `--config <path>`, `--log-file <path>`.
 | `c` | compose |
 | `r` / `R` | reply / reply-all |
 | `f` | forward |
+| `t` | view conversation thread |
 | `s` | toggle flag |
 | `u` | toggle read/unread |
 | `m` | account manager |

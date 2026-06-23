@@ -69,6 +69,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
     header_lines.push(header_line("Subject:", &msg.headers.subject));
     header_lines.push(header_line("Date:", &date_str));
+    if app.current_thread_count > 1 {
+        header_lines.push(Line::from(vec![
+            Span::styled(format!("{:<9}", "Thread:"), theme::muted()),
+            Span::styled(
+                format!("{} messages - press [t] to view", app.current_thread_count),
+                theme::accent(),
+            ),
+        ]));
+    }
 
     let headers = Paragraph::new(header_lines).wrap(Wrap { trim: false });
     f.render_widget(headers, chunks[0]);
