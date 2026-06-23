@@ -544,6 +544,7 @@ fn sample_messages(
                 flags,
                 size: body.len() as u64,
                 body: Some(body_obj),
+                has_attachments: false,
                 snippet,
                 internal_date: date,
             }

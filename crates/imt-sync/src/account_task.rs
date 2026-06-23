@@ -66,6 +66,7 @@ fn to_message(account_id: AccountId, folder_id: FolderId, env: EnvelopeFetch) ->
         flags: env.flags,
         size: env.size,
         body: None,
+        has_attachments: env.has_attachments,
         snippet,
         internal_date: env.internal_date,
     }
@@ -326,6 +327,7 @@ async fn sync_one_folder<B: MailBackend>(
                 m.headers = env.headers.clone();
                 m.size = env.size;
                 m.internal_date = env.internal_date;
+                m.has_attachments = m.has_attachments || env.has_attachments;
                 m
             }
             None => to_message(ctx.account.id, folder.id, env),

@@ -75,6 +75,12 @@ pub struct Message {
     pub size: u64,
     /// Lazy: full body is fetched on demand. None means "envelope only".
     pub body: Option<MessageBody>,
+    /// Whether the message carries attachments. Set from BODYSTRUCTURE / the
+    /// Content-Type header at envelope-sync time (so the list can show it
+    /// without fetching the body), and corrected to the exact value once the
+    /// full body is fetched.
+    #[serde(default)]
+    pub has_attachments: bool,
     /// Short preview (first ~256 chars of plain text).
     pub snippet: String,
     pub internal_date: DateTime<Utc>,

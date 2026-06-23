@@ -46,8 +46,8 @@ impl<'a> MessageRepo<'a> {
                 rfc_message_id, in_reply_to, references_json, \
                 from_json, to_json, cc_json, bcc_json, reply_to_json, \
                 subject, date, internal_date, flags_json, size, snippet, \
-                body_text, body_html, attachments_json, has_body) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23) \
+                body_text, body_html, attachments_json, has_body, has_attachments) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24) \
              ON CONFLICT(folder_id, uid) DO UPDATE SET \
                 id = excluded.id, \
                 thread_id = excluded.thread_id, \
@@ -64,7 +64,8 @@ impl<'a> MessageRepo<'a> {
                 internal_date = excluded.internal_date, \
                 flags_json = excluded.flags_json, \
                 size = excluded.size, \
-                snippet = excluded.snippet",
+                snippet = excluded.snippet, \
+                has_attachments = max(messages.has_attachments, excluded.has_attachments)",
         )
         .bind(&id_bytes)
         .bind(&acc_bytes)
@@ -89,6 +90,7 @@ impl<'a> MessageRepo<'a> {
         .bind(&body_html)
         .bind(&attachments_json)
         .bind(has_body)
+        .bind(if m.has_attachments { 1_i64 } else { 0 })
         .execute(self.0)
         .await?;
         Ok(())
@@ -98,13 +100,16 @@ impl<'a> MessageRepo<'a> {
     pub async fn set_body(&self, id: MessageId, body: &MessageBody) -> Result<()> {
         let id_bytes = uuid_bytes(&id.0);
         let attachments_json = serde_json::to_string(&body.attachments)?;
+        // Now that the real parts are known, set the exact attachment flag.
+        let has_attachments: i64 = if body.attachments.is_empty() { 0 } else { 1 };
         sqlx::query(
-            "UPDATE messages SET body_text = ?1, body_html = ?2, attachments_json = ?3, has_body = 1 \
-             WHERE id = ?4",
+            "UPDATE messages SET body_text = ?1, body_html = ?2, attachments_json = ?3, has_body = 1, \
+             has_attachments = ?4 WHERE id = ?5",
         )
         .bind(&body.text_plain)
         .bind(&body.text_html)
         .bind(&attachments_json)
+        .bind(has_attachments)
         .bind(&id_bytes)
         .execute(self.0)
         .await?;
@@ -189,14 +194,14 @@ const COLUMNS: &str = "id, account_id, folder_id, thread_id, uid, \
     rfc_message_id, in_reply_to, references_json, \
     from_json, to_json, cc_json, bcc_json, reply_to_json, \
     subject, date, internal_date, flags_json, size, snippet, \
-    body_text, body_html, attachments_json, has_body";
+    body_text, body_html, attachments_json, has_body, has_attachments";
 
 const SELECT_MESSAGE: &str =
     "SELECT id, account_id, folder_id, thread_id, uid, \
      rfc_message_id, in_reply_to, references_json, \
      from_json, to_json, cc_json, bcc_json, reply_to_json, \
      subject, date, internal_date, flags_json, size, snippet, \
-     body_text, body_html, attachments_json, has_body \
+     body_text, body_html, attachments_json, has_body, has_attachments \
      FROM messages WHERE id = ?1";
 
 const SELECT_MESSAGE_BY_UID: &str =
@@ -204,7 +209,7 @@ const SELECT_MESSAGE_BY_UID: &str =
      rfc_message_id, in_reply_to, references_json, \
      from_json, to_json, cc_json, bcc_json, reply_to_json, \
      subject, date, internal_date, flags_json, size, snippet, \
-     body_text, body_html, attachments_json, has_body \
+     body_text, body_html, attachments_json, has_body, has_attachments \
      FROM messages WHERE folder_id = ?1 AND uid = ?2";
 
 const LIST_BY_FOLDER: &str =
@@ -212,7 +217,7 @@ const LIST_BY_FOLDER: &str =
      rfc_message_id, in_reply_to, references_json, \
      from_json, to_json, cc_json, bcc_json, reply_to_json, \
      subject, date, internal_date, flags_json, size, snippet, \
-     body_text, body_html, attachments_json, has_body \
+     body_text, body_html, attachments_json, has_body, has_attachments \
      FROM messages WHERE folder_id = ?1 \
      ORDER BY internal_date DESC LIMIT ?2 OFFSET ?3";
 
@@ -243,6 +248,7 @@ fn row_to_message(row: &sqlx::sqlite::SqliteRow) -> Result<Message> {
     let body_html: Option<String> = row.try_get("body_html")?;
     let attachments_json: String = row.try_get("attachments_json")?;
     let has_body: i64 = row.try_get("has_body")?;
+    let has_attachments: i64 = row.try_get("has_attachments").unwrap_or(0);
 
     let id_uuid = uuid_from_slice(&id_bytes).map_err(|e| StoreError::Other(e.to_string()))?;
     let acc_uuid = uuid_from_slice(&acc_bytes).map_err(|e| StoreError::Other(e.to_string()))?;
@@ -295,7 +301,90 @@ fn row_to_message(row: &sqlx::sqlite::SqliteRow) -> Result<Message> {
         flags,
         size: size as u64,
         body,
+        has_attachments: has_attachments != 0,
         snippet,
         internal_date,
     })
+}
+
+#[cfg(test)]
+mod has_attachments_tests {
+    use super::*;
+    use crate::{AccountRepo, Db, FolderRepo};
+    use chrono::Utc;
+    use imt_core::{
+        Account, AccountId, Address, Attachment, AuthMethod, Flag, Folder, FolderId, FolderRole,
+        ImapConfig, Message, MessageBody, MessageHeaders, MessageId, SmtpConfig, Tls, Uid,
+    };
+
+    fn tmp_db_path() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("imt-store-test-{}.sqlite3", uuid::Uuid::new_v4().simple()))
+    }
+
+    fn account() -> Account {
+        let auth = AuthMethod::Password { username: "me@example.com".into() };
+        Account {
+            id: AccountId::new(),
+            display_name: "Me".into(),
+            address: Address::named("Me", "me@example.com"),
+            imap: ImapConfig { host: "imap".into(), port: 993, tls: Tls::Implicit, auth: auth.clone() },
+            smtp: SmtpConfig { host: "smtp".into(), port: 465, tls: Tls::Implicit, auth },
+            order: 0,
+        }
+    }
+
+    fn folder(account_id: AccountId) -> Folder {
+        Folder {
+            id: FolderId::new(), account_id, path: "Sent".into(), name: "Sent".into(),
+            role: FolderRole::Sent, uid_validity: 1, uid_next: 2, message_count: 0, unread_count: 0,
+        }
+    }
+
+    fn envelope(account_id: AccountId, folder_id: FolderId, uid: u32, has_attachments: bool) -> Message {
+        Message {
+            id: MessageId::new(), account_id, folder_id, thread_id: None, uid: Uid(uid),
+            headers: MessageHeaders {
+                rfc_message_id: Some(format!("<{uid}@x>")), in_reply_to: None, references: vec![],
+                from: vec![Address::new("a@b.com")], to: vec![], cc: vec![], bcc: vec![], reply_to: vec![],
+                subject: "s".into(), date: Utc::now(),
+            },
+            flags: vec![Flag::Seen], size: 10, body: None, has_attachments, snippet: "s".into(),
+            internal_date: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn flag_persists_and_is_corrected_by_body() {
+        let path = tmp_db_path();
+        let db = Db::open(&path).await.unwrap();
+        let acc = account();
+        let fld = folder(acc.id);
+        AccountRepo::new(db.pool()).upsert(&acc).await.unwrap();
+        FolderRepo::new(db.pool()).upsert(&fld).await.unwrap();
+
+        let mrepo = MessageRepo::new(db.pool());
+
+        // Envelope says it has attachments (header heuristic). Persists.
+        let m1 = envelope(acc.id, fld.id, 1, true);
+        mrepo.upsert_envelope(&m1).await.unwrap();
+        let got = mrepo.get_by_uid(fld.id, Uid(1)).await.unwrap();
+        assert!(got.has_attachments, "envelope flag should persist");
+        assert!(got.body.is_none());
+
+        // Body turns out to have NO real attachments -> flag corrected to false.
+        mrepo.set_body(m1.id, &MessageBody { text_plain: Some("hi".into()), text_html: None, attachments: vec![] }).await.unwrap();
+        let got = mrepo.get(m1.id).await.unwrap();
+        assert!(!got.has_attachments, "body with no parts clears the flag");
+
+        // Envelope says no attachments, but body has one -> flag set true.
+        let m2 = envelope(acc.id, fld.id, 2, false);
+        mrepo.upsert_envelope(&m2).await.unwrap();
+        let att = Attachment { filename: "a.pdf".into(), mime_type: "application/pdf".into(), size: 3, part_id: "2".into(), content_id: None, inline: false, temp_path: None };
+        mrepo.set_body(m2.id, &MessageBody { text_plain: Some("hi".into()), text_html: None, attachments: vec![att] }).await.unwrap();
+        let got = mrepo.get(m2.id).await.unwrap();
+        assert!(got.has_attachments, "body with a part sets the flag");
+        assert_eq!(got.body.unwrap().attachments.len(), 1);
+
+        let _ = std::fs::remove_file(&path);
+    }
 }

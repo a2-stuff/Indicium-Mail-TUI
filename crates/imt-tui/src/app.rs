@@ -1899,18 +1899,16 @@ impl App {
         crate::theme::apply(state.draft.theme);
     }
 
-    /// Whether a message has any attachments, using its inline body or the
-    /// cached/downloaded body. Also triggers a body fetch if not yet cached.
+    /// Whether a message has any attachments. Uses the persisted/synced
+    /// `has_attachments` flag (set from the Content-Type at envelope time and
+    /// corrected once the body is fetched) and the loaded body if present. Does
+    /// not trigger a body fetch, so it is cheap to call per list row.
     pub fn message_has_attachments(&self, m: &Message) -> bool {
-        if let Some(b) = m.body.as_ref() {
-            if !b.attachments.is_empty() {
-                return true;
-            }
-        }
-        self.data
-            .message_body(m.id)
-            .map(|b| !b.attachments.is_empty())
-            .unwrap_or(false)
+        m.has_attachments
+            || m.body
+                .as_ref()
+                .map(|b| !b.attachments.is_empty())
+                .unwrap_or(false)
     }
 
     fn open_attachment_viewer(&mut self) {

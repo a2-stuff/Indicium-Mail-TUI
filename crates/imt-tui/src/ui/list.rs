@@ -102,7 +102,13 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                 .map(|a| a.name.clone().unwrap_or_else(|| a.email.clone()))
                 .unwrap_or_default();
             let from = truncate_to(&from, 18);
-            let subject = m.headers.subject.clone();
+            let has_attach = app.message_has_attachments(m);
+            let subject_raw = m.headers.subject.clone();
+            let subject = if has_attach {
+                format!("📎 {}", subject_raw)
+            } else {
+                subject_raw
+            };
             let date = format_date(m.headers.date);
 
             let row_style = if unread { theme::unread() } else { theme::normal() };

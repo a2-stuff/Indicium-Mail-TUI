@@ -153,6 +153,9 @@ impl SyncEngine {
                     m.headers = env.headers.clone();
                     m.size = env.size;
                     m.internal_date = env.internal_date;
+                    // Keep a known-true (from a fetched body) but let the header
+                    // heuristic light it up before the body is fetched.
+                    m.has_attachments = m.has_attachments || env.has_attachments;
                     m
                 }
                 None => Message {
@@ -166,6 +169,7 @@ impl SyncEngine {
                     flags: env.flags,
                     size: env.size,
                     body: None,
+                    has_attachments: env.has_attachments,
                     internal_date: env.internal_date,
                 },
             };

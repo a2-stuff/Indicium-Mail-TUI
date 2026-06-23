@@ -87,6 +87,9 @@ pub struct EnvelopeFetch {
     pub internal_date: DateTime<Utc>,
     /// Short text snippet; empty until full bodies are fetched elsewhere.
     pub snippet: String,
+    /// Whether the message appears to carry attachments, detected from the
+    /// Content-Type header at envelope time (no body fetch required).
+    pub has_attachments: bool,
 }
 
 /// Push notification produced while a backend is in IDLE.

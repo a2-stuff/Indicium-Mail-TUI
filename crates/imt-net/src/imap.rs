@@ -376,6 +376,25 @@ fn flags_to_imap_list(flags: &[Flag]) -> String {
     format!("({})", inner.join(" "))
 }
 
+/// Detect, from header bytes alone, whether a message likely carries
+/// attachments. Uses the top-level Content-Type: a `multipart/mixed` or
+/// `multipart/related` container is the standard wrapper when attachments (or
+/// inline images) are present. Avoids a body fetch; the exact attachment list
+/// replaces this once the full body is fetched.
+fn header_has_attachments(bytes: &[u8]) -> bool {
+    let Some(parsed) = MessageParser::default().parse(bytes) else {
+        return false;
+    };
+    if let Some(ct) = parsed.content_type() {
+        if ct.ctype().eq_ignore_ascii_case("multipart") {
+            if let Some(sub) = ct.subtype() {
+                return sub.eq_ignore_ascii_case("mixed") || sub.eq_ignore_ascii_case("related");
+            }
+        }
+    }
+    false
+}
+
 fn fetch_to_envelope(f: &Fetch) -> Result<EnvelopeFetch> {
     let uid = f
         .uid
@@ -384,6 +403,7 @@ fn fetch_to_envelope(f: &Fetch) -> Result<EnvelopeFetch> {
         .header()
         .ok_or_else(|| NetError::Protocol("fetch missing header".into()))?;
     let headers = parse_headers_from_bytes(header_bytes)?;
+    let has_attachments = header_has_attachments(header_bytes);
 
     let flags: Vec<Flag> = f.flags().filter_map(|fl| convert_flag(&fl)).collect();
     let size = f.size.unwrap_or(0) as u64;
@@ -399,6 +419,7 @@ fn fetch_to_envelope(f: &Fetch) -> Result<EnvelopeFetch> {
         size,
         internal_date,
         snippet: String::new(),
+        has_attachments,
     })
 }
 
@@ -941,3 +962,30 @@ impl IdleHandleImpl for PollingIdle {
     }
 }
 
+
+#[cfg(test)]
+mod attach_detect_tests {
+    use super::header_has_attachments;
+
+    #[test]
+    fn multipart_mixed_has_attachments() {
+        let h = b"From: a@b.com\r\nTo: c@d.com\r\nSubject: x\r\nContent-Type: multipart/mixed; boundary=\"xx\"\r\n\r\n";
+        assert!(header_has_attachments(h));
+    }
+
+    #[test]
+    fn multipart_related_has_attachments() {
+        let h = b"Subject: x\r\nContent-Type: multipart/related; boundary=\"xx\"\r\n\r\n";
+        assert!(header_has_attachments(h));
+    }
+
+    #[test]
+    fn plain_and_alternative_have_none() {
+        let plain = b"Subject: x\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n";
+        assert!(!header_has_attachments(plain));
+        let alt = b"Subject: x\r\nContent-Type: multipart/alternative; boundary=\"xx\"\r\n\r\n";
+        assert!(!header_has_attachments(alt));
+        let none = b"Subject: x\r\n\r\n";
+        assert!(!header_has_attachments(none));
+    }
+}
