@@ -1632,14 +1632,21 @@ impl App {
         let my_email = acc.map(|a| a.address.email.clone()).unwrap_or_default();
         let subject_fallback = compose.subject.value().to_string();
 
-        let msg = self.current_message().cloned();
-        let body = self.current_body.clone();
+        // Only treat the reader's selected message as context when this compose
+        // is actually a reply/forward. For a brand-new email, the background
+        // message must NOT be pulled in as the "original".
+        let is_reply = compose.draft.in_reply_to.is_some();
+        let msg = if is_reply { self.current_message().cloned() } else { None };
+        let body = if is_reply { self.current_body.clone() } else { None };
 
-        let original = body
-            .as_ref()
-            .map(crate::ai::body_to_text)
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| crate::ai::unquote(&quoted));
+        let original = if is_reply {
+            body.as_ref()
+                .map(crate::ai::body_to_text)
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| crate::ai::unquote(&quoted))
+        } else {
+            String::new()
+        };
 
         let (from, subject, date) = match &msg {
             Some(m) => (
@@ -1650,8 +1657,11 @@ impl App {
             None => (String::new(), subject_fallback, String::new()),
         };
 
-        if original.trim().is_empty() && user_notes.trim().is_empty() {
-            self.set_status("Nothing to work from - reply to a message or type some notes first");
+        if original.trim().is_empty() && user_notes.trim().is_empty() && instruction.trim().is_empty()
+        {
+            self.set_status(
+                "Nothing to work from - type some notes, add an instruction (Ctrl-T), or reply to a message",
+            );
             return;
         }
 
@@ -1664,13 +1674,15 @@ impl App {
             original,
             user_notes,
             instruction,
+            is_reply,
         };
         let prompt = crate::ai::build_prompt(&ctx);
         let (tx, rx) = std::sync::mpsc::channel();
         self.ai_rx = Some(rx);
         self.ai_generating = true;
         self.set_status(format!(
-            "Generating reply with {}...",
+            "Generating {} with {}...",
+            if is_reply { "reply" } else { "email" },
             self.settings.ai_provider.label()
         ));
         crate::ai::spawn_generate(

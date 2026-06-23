@@ -37,62 +37,102 @@ pub struct ReplyContext {
     pub user_notes: String,
     /// Extra instruction / context the user gave for this reply (optional).
     pub instruction: String,
+    /// True when this is a reply/forward (there is a source email to respond to);
+    /// false for a brand-new compose, where there is no original to consider.
+    pub is_reply: bool,
 }
 
 /// Build the prompt fed to the provider CLI.
 pub fn build_prompt(ctx: &ReplyContext) -> String {
     let mut p = String::new();
-    p.push_str(
-        "You are drafting a reply to an email on behalf of the user. \
-Output ONLY the reply body text - no subject line, no To/From headers, no quoted \
-original text, no markdown code fences, and no commentary before or after.\n\n\
-Write like a real person, not a template. Use natural paragraphs of one to a few \
-sentences each. Separate paragraphs with a SINGLE blank line. Do NOT put a blank \
-line between every line or after every sentence. Start with a brief greeting and \
-end with a short sign-off. Keep it concise. \
-Do not invent facts that are not supported by the email thread or the user's notes.\n\n",
-    );
-    if !ctx.my_name.trim().is_empty() || !ctx.my_email.trim().is_empty() {
-        p.push_str(&format!(
-            "The reply is sent by: {} <{}>\n\n",
-            ctx.my_name, ctx.my_email
-        ));
-    }
-    p.push_str("--- EMAIL BEING REPLIED TO ---\n");
-    if !ctx.from.trim().is_empty() {
-        p.push_str(&format!("From: {}\n", ctx.from));
-    }
-    if !ctx.subject.trim().is_empty() {
-        p.push_str(&format!("Subject: {}\n", ctx.subject));
-    }
-    if !ctx.date.trim().is_empty() {
-        p.push_str(&format!("Date: {}\n", ctx.date));
-    }
-    p.push('\n');
-    p.push_str(ctx.original.trim());
-    p.push_str("\n--- END EMAIL ---\n\n");
-
-    if ctx.user_notes.trim().is_empty() {
+    let has_original = ctx.is_reply && !ctx.original.trim().is_empty();
+    if has_original {
         p.push_str(
-            "Write a complete, ready-to-send reply that appropriately responds to the email above.",
+            "You are drafting a reply to an email on behalf of the user. \
+Output ONLY the reply body text - no subject line, no To/From headers, no quoted \
+original text, no markdown code fences, and no commentary before or after.\n\n",
         );
     } else {
         p.push_str(
-            "The user jotted the key points / a partial draft for the reply below. Expand and \
+            "You are composing a NEW email on behalf of the user. \
+Output ONLY the email body text - no subject line, no To/From headers, no \
+markdown code fences, and no commentary before or after.\n\n",
+        );
+    }
+    p.push_str(
+        "Write like a real person, not a template. Use natural paragraphs of one to a few \
+sentences each. Separate paragraphs with a SINGLE blank line. Do NOT put a blank \
+line between every line or after every sentence. Start with a brief greeting and \
+end with a short sign-off. Keep it concise. \
+Do not invent facts that are not supported by the email or the user's notes.\n\n",
+    );
+    if !ctx.my_name.trim().is_empty() || !ctx.my_email.trim().is_empty() {
+        p.push_str(&format!(
+            "The email is sent by: {} <{}>\n\n",
+            ctx.my_name, ctx.my_email
+        ));
+    }
+    if has_original {
+        p.push_str("--- EMAIL BEING REPLIED TO ---\n");
+        if !ctx.from.trim().is_empty() {
+            p.push_str(&format!("From: {}\n", ctx.from));
+        }
+        if !ctx.subject.trim().is_empty() {
+            p.push_str(&format!("Subject: {}\n", ctx.subject));
+        }
+        if !ctx.date.trim().is_empty() {
+            p.push_str(&format!("Date: {}\n", ctx.date));
+        }
+        p.push('\n');
+        p.push_str(ctx.original.trim());
+        p.push_str("\n--- END EMAIL ---\n\n");
+    } else if !ctx.subject.trim().is_empty() {
+        p.push_str(&format!("The email's subject line is: {}\n\n", ctx.subject.trim()));
+    }
+
+    match (has_original, ctx.user_notes.trim().is_empty()) {
+        (true, true) => p.push_str(
+            "Write a complete, ready-to-send reply that appropriately responds to the email above.",
+        ),
+        (true, false) => {
+            p.push_str(
+                "The user jotted the key points / a partial draft for the reply below. Expand and \
 polish them into a complete, ready-to-send reply: weave in the concrete details they gave \
 (times, locations, names, answers) together with the relevant context from the email above. \
 Keep every concrete detail the user provided; do not drop or contradict any of them.\n\n",
-        );
-        p.push_str("--- USER'S NOTES / DRAFT ---\n");
-        p.push_str(ctx.user_notes.trim());
-        p.push_str("\n--- END NOTES ---");
+            );
+            p.push_str("--- USER'S NOTES / DRAFT ---\n");
+            p.push_str(ctx.user_notes.trim());
+            p.push_str("\n--- END NOTES ---");
+        }
+        (false, true) => p.push_str(
+            "Write a complete, ready-to-send email. Follow the instruction below for what it \
+should say; do not invent recipients or facts that were not provided.",
+        ),
+        (false, false) => {
+            p.push_str(
+                "The user jotted the key points / a partial draft for the email below. Expand and \
+polish them into a complete, ready-to-send email, keeping every concrete detail they provided \
+(times, locations, names, figures); do not drop or contradict any of them.\n\n",
+            );
+            p.push_str("--- USER'S NOTES / DRAFT ---\n");
+            p.push_str(ctx.user_notes.trim());
+            p.push_str("\n--- END NOTES ---");
+        }
     }
 
     if !ctx.instruction.trim().is_empty() {
-        p.push_str(
-            "\n\nAdditional instruction / context from the user for this reply - follow it \
+        if has_original {
+            p.push_str(
+                "\n\nAdditional instruction / context from the user for this reply - follow it \
 while still respecting the email thread above:\n--- INSTRUCTION ---\n",
-        );
+            );
+        } else {
+            p.push_str(
+                "\n\nInstruction / context from the user for this email - follow it:\n\
+--- INSTRUCTION ---\n",
+            );
+        }
         p.push_str(ctx.instruction.trim());
         p.push_str("\n--- END INSTRUCTION ---");
     }
@@ -106,8 +146,8 @@ want attached into the ./attachments/ directory of your current working director
 exists). Use the rest of the working directory for any scratch/intermediate work - only files \
 in ./attachments/ are attached. You may write and run scripts to produce real binary files \
 (e.g. a Python script to render a PNG or build an .xlsx). Do NOT mention file paths in the \
-reply body; still output ONLY the reply body text on stdout. If no file was requested, create \
-nothing and just write the reply.",
+message body; still output ONLY the email body text on stdout. If no file was requested, create \
+nothing and just write the message.",
     );
     p
 }

@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The AI reply instruction dialog moved from `Ctrl-Shift-G` to `Ctrl-T` so it works on terminals without the enhanced keyboard protocol (`Ctrl-Shift-G` still works where supported).
 
+### Fixed
+- **AI generation in a new compose no longer pulls in the background-selected message as context.** When composing a brand-new email (not a reply), `Ctrl-G` / `Ctrl-T` now generate a fresh email from your notes and instruction only - the message highlighted in the list/reader behind the compose window is ignored. Replies and forwards still use the email they are responding to. The prompt is framed as a new email (no "email being replied to" section), and an instruction-only `Ctrl-T` is now accepted in a new compose.
+
 ## [0.2.0] - 2026-06-23
 
 ### Added
