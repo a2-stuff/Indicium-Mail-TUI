@@ -55,6 +55,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .map(|m| {
             let unread = if m.is_unread() { "●" } else { " " };
             let flag = if m.is_flagged() { "★" } else { " " };
+            let clip = if app.message_has_attachments(m) { "📎" } else { "  " };
             let from = m
                 .headers
                 .from
@@ -66,6 +67,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                 Span::styled(format!(" {}{} ", unread, flag), theme::accent()),
                 Span::styled(format!("{:<28}", truncate(&from, 28)), theme::normal()),
                 Span::styled(format!("  {}", date), theme::muted()),
+                Span::styled(format!("  {}", clip), theme::accent()),
             ]))
         })
         .collect();
@@ -77,6 +79,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(list, rows[0], &mut state);
 
     // Selected message body.
+    let sel_has_attachments = ts
+        .messages
+        .get(ts.selected)
+        .map(|m| app.message_has_attachments(m))
+        .unwrap_or(false);
     let body_text = ts
         .messages
         .get(ts.selected)
@@ -86,14 +93,24 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             } else {
                 m.headers.subject.clone()
             };
-            let body = app
-                .data
-                .message_body(m.id)
-                .or_else(|| m.body.clone())
-                .map(|b| crate::ai::body_to_text(&b))
+            let full = app.data.message_body(m.id).or_else(|| m.body.clone());
+            let body = full
+                .as_ref()
+                .map(crate::ai::body_to_text)
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| "Loading message...".to_string());
-            format!("{}\n\n{}", subj, body)
+            let att_line = match full.as_ref() {
+                Some(b) if !b.attachments.is_empty() => {
+                    let names: Vec<String> = b
+                        .attachments
+                        .iter()
+                        .map(|a| a.filename.clone())
+                        .collect();
+                    format!("📎 {} attachment(s): {}\n\n", names.len(), names.join(", "))
+                }
+                _ => String::new(),
+            };
+            format!("{}\n\n{}{}", subj, att_line, body)
         })
         .unwrap_or_default();
     let body = Paragraph::new(body_text)
@@ -107,11 +124,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         .style(theme::normal());
     f.render_widget(body, rows[1]);
 
-    let footer = Paragraph::new(Span::styled(
-        " [↑↓] select message   [PgUp/PgDn] scroll   [Esc] close ",
-        theme::muted(),
-    ))
-    .alignment(Alignment::Center);
+    let footer_text = if sel_has_attachments {
+        " [↑↓] select message   [PgUp/PgDn] scroll   [a] view attachments   [Esc] close "
+    } else {
+        " [↑↓] select message   [PgUp/PgDn] scroll   [Esc] close "
+    };
+    let footer = Paragraph::new(Span::styled(footer_text, theme::muted())).alignment(Alignment::Center);
     f.render_widget(footer, rows[2]);
 }
 

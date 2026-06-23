@@ -41,7 +41,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::FilePicker => "[↑↓] move  [Space] select  [Enter] confirm  [Backspace] up  [Esc] cancel",
         Mode::AttachmentViewer => "[↑↓] navigate  [Enter] view  [s] save  [Esc] close",
         Mode::HtmlViewer => "[↑↓] scroll  [o / Esc] close",
-        Mode::Thread => "[↑↓] select message  [PgUp/PgDn] scroll  [Esc] close",
+        Mode::Thread => "[↑↓] select message  [PgUp/PgDn] scroll  [a] attachments  [Esc] close",
     };
     let (sync_text, sync_style) = if app.is_busy() {
         (format!(" {} {} ", app.spinner_frame(), app.backend_status), theme::accent())

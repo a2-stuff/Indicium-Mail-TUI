@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-06-23
+
+### Added
+- **View attachments from the conversation thread view.** In the thread (`t`) modal, messages that have attachments are marked with a 📎; the selected message lists its attachment names above the body. Press `a` (or `Enter`) to open the attachment viewer for the selected thread message - images, PDF, and Word/text all render as in the reader. Closing the viewer returns to the conversation view.
+
 ## [0.4.0] - 2026-06-23
 
 ### Added

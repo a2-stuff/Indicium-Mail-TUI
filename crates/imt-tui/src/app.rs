@@ -519,6 +519,9 @@ pub struct AttachmentViewerState {
     pub mode: AttachmentViewMode,
     /// Download destination chosen by user (for save action).
     pub save_dest: Option<std::path::PathBuf>,
+    /// Mode to return to when the viewer is fully closed (Normal, or Thread when
+    /// opened from the conversation view).
+    pub return_mode: Mode,
 }
 
 /// Move-to-folder modal state.
@@ -1896,16 +1899,46 @@ impl App {
         crate::theme::apply(state.draft.theme);
     }
 
+    /// Whether a message has any attachments, using its inline body or the
+    /// cached/downloaded body. Also triggers a body fetch if not yet cached.
+    pub fn message_has_attachments(&self, m: &Message) -> bool {
+        if let Some(b) = m.body.as_ref() {
+            if !b.attachments.is_empty() {
+                return true;
+            }
+        }
+        self.data
+            .message_body(m.id)
+            .map(|b| !b.attachments.is_empty())
+            .unwrap_or(false)
+    }
+
     fn open_attachment_viewer(&mut self) {
-        let attachments = match self.current_body.as_ref() {
-            Some(b) if !b.attachments.is_empty() => b.attachments.clone(),
-            Some(_) => { self.set_status("No attachments"); return; }
-            None => { self.set_status("Open a message first"); return; }
+        // In the conversation view, view the selected thread message's
+        // attachments; otherwise the message open in the reader.
+        let (attachments, return_mode) = if self.mode == Mode::Thread {
+            let body = self.thread_state.as_ref().and_then(|ts| {
+                ts.messages
+                    .get(ts.selected)
+                    .and_then(|m| self.data.message_body(m.id).or_else(|| m.body.clone()))
+            });
+            match body {
+                Some(b) if !b.attachments.is_empty() => (b.attachments, Mode::Thread),
+                Some(_) => { self.set_status("No attachments on this message"); return; }
+                None => { self.set_status("Message not downloaded yet"); return; }
+            }
+        } else {
+            match self.current_body.as_ref() {
+                Some(b) if !b.attachments.is_empty() => (b.attachments.clone(), Mode::Normal),
+                Some(_) => { self.set_status("No attachments"); return; }
+                None => { self.set_status("Open a message first"); return; }
+            }
         };
         self.attachment_viewer = Some(AttachmentViewerState {
             attachments,
             mode: AttachmentViewMode::Listing { selected: 0 },
             save_dest: None,
+            return_mode,
         });
         self.mode = Mode::AttachmentViewer;
     }
@@ -1968,8 +2001,13 @@ impl App {
                 }
             }
             _ => {
+                let return_mode = self
+                    .attachment_viewer
+                    .as_ref()
+                    .map(|av| av.return_mode)
+                    .unwrap_or(Mode::Normal);
                 self.attachment_viewer = None;
-                self.mode = Mode::Normal;
+                self.mode = return_mode;
             }
         }
     }

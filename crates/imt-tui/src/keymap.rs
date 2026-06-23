@@ -320,6 +320,7 @@ fn map_thread(key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Down | KeyCode::Char('j') => Some(KeyAction::Down),
         KeyCode::PageUp => Some(KeyAction::PageUp),
         KeyCode::PageDown => Some(KeyAction::PageDown),
+        KeyCode::Char('a') | KeyCode::Enter => Some(KeyAction::OpenAttachments),
         _ => None,
     }
 }

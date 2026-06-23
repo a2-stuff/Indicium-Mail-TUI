@@ -37,7 +37,7 @@ pub fn render(f: &mut Frame, full: Rect) {
         ("c", "compose"),
         ("r / R", "reply / reply-all"),
         ("f", "forward"),
-        ("t", "view conversation thread"),
+        ("t", "view conversation thread (a = attachments inside)"),
         ("a", "attachments (reader focus)"),
         ("u", "toggle read / unread"),
         ("s", "★ mark / unmark important"),
