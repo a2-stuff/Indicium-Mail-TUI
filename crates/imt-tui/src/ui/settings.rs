@@ -172,7 +172,7 @@ pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
 
     let info = Paragraph::new(vec![
         Line::from(Span::styled("", theme::muted())),
-        Line::from(Span::styled(" Compose: Ctrl-I drafts a reply with the selected AI provider.", theme::muted())),
+        Line::from(Span::styled(" Compose: Ctrl-G drafts a reply with the selected AI provider.", theme::muted())),
         Line::from(Span::styled(" Messages are NEVER deleted from the server.", theme::muted())),
     ]);
     f.render_widget(info, rows[8]);

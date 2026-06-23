@@ -338,7 +338,9 @@ fn map_compose(key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('s') if ctrl => Some(KeyAction::Send),
         KeyCode::Char('d') if ctrl => Some(KeyAction::SaveDraft),
         KeyCode::Char('a') if ctrl => Some(KeyAction::AddAttachment),
-        KeyCode::Char('i') if ctrl => Some(KeyAction::AiGenerateReply),
+        // NOTE: Ctrl-I cannot be used - terminals send it as Tab (0x09),
+        // indistinguishable from the focus-next key. Ctrl-G ("Generate").
+        KeyCode::Char('g') if ctrl => Some(KeyAction::AiGenerateReply),
         KeyCode::Esc => Some(KeyAction::CancelCompose),
         KeyCode::Tab => Some(KeyAction::FocusNext),
         KeyCode::BackTab => Some(KeyAction::FocusPrev),

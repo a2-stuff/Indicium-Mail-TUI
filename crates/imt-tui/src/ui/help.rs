@@ -53,7 +53,7 @@ pub fn render(f: &mut Frame, full: Rect) {
         ("Ctrl-S", "send"),
         ("Ctrl-D", "save draft"),
         ("Ctrl-A", "add attachment"),
-        ("Ctrl-I", "AI reply (draft / refine via Claude, Gemini, or Codex)"),
+        ("Ctrl-G", "AI reply (draft / refine via Claude, Gemini, or Codex)"),
         ("Esc", "cancel"),
     ]));
     lines.push(Line::from(""));

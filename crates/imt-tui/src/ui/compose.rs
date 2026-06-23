@@ -91,7 +91,7 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
         Span::styled(" send  ", theme::muted()),
         Span::styled("Ctrl-D", theme::accent()),
         Span::styled(" save draft  ", theme::muted()),
-        Span::styled("Ctrl-I", theme::accent()),
+        Span::styled("Ctrl-G", theme::accent()),
         Span::styled(" AI reply  ", theme::muted()),
         Span::styled("Tab", theme::accent()),
         Span::styled(" next field  ", theme::muted()),
