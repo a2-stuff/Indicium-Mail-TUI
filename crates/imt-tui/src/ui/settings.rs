@@ -41,7 +41,7 @@ pub fn render(f: &mut Frame, area: Rect) {
 }
 
 pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
-    let modal = centered(area, 66, 20);
+    let modal = centered(area, 66, 24);
     let s = match app.settings_state.as_ref() {
         Some(s) => s,
         None => return,
@@ -62,6 +62,8 @@ pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
         Constraint::Length(2), // browser
         Constraint::Length(2), // show snippet
         Constraint::Length(2), // theme
+        Constraint::Length(2), // ai provider
+        Constraint::Length(2), // ai model
         Constraint::Min(0),    // info
         Constraint::Length(1), // footer
     ])
@@ -136,17 +138,49 @@ pub fn render_modal(f: &mut Frame, area: Rect, app: &App) {
         rows[5],
     );
 
+    // AI provider row: cycler (←/→), like Theme.
+    let prov_sel = s.field == SettingsField::AiProvider;
+    let prov_style = if prov_sel { theme::accent() } else { theme::normal() };
+    let prov_value = if prov_sel {
+        format!("< {} >", s.draft.ai_provider.label())
+    } else {
+        s.draft.ai_provider.label().to_string()
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!(" {} ", mark(prov_sel)), theme::accent()),
+            Span::styled(format!("{:<26}", "AI reply provider"), prov_style),
+            Span::styled(prov_value, theme::accent().add_modifier(Modifier::BOLD)),
+        ])),
+        rows[6],
+    );
+
+    // AI model row: text input, like Browser.
+    let model_display = if s.ai_model.value().is_empty() {
+        "[]  (empty = CLI default)".to_string()
+    } else {
+        format!("[{}]", s.ai_model.value())
+    };
+    f.render_widget(
+        line(
+            s.field == SettingsField::AiModel,
+            "AI model",
+            model_display,
+        ),
+        rows[7],
+    );
+
     let info = Paragraph::new(vec![
         Line::from(Span::styled("", theme::muted())),
+        Line::from(Span::styled(" Compose: Ctrl-I drafts a reply with the selected AI provider.", theme::muted())),
         Line::from(Span::styled(" Messages are NEVER deleted from the server.", theme::muted())),
-        Line::from(Span::styled(" Fetches use BODY.PEEK[] (no Seen flag set).", theme::muted())),
     ]);
-    f.render_widget(info, rows[6]);
+    f.render_widget(info, rows[8]);
 
     let footer = Paragraph::new(Span::styled(
         " [Tab] next  [Space] toggle  [←/→] cycle  [Ctrl+S] save  [Esc] cancel ",
         theme::muted(),
     ))
     .alignment(Alignment::Center);
-    f.render_widget(footer, rows[7]);
+    f.render_widget(footer, rows[9]);
 }

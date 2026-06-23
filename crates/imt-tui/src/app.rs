@@ -329,6 +329,10 @@ pub struct App {
     pub attachment_viewer: Option<AttachmentViewerState>,
     /// Inline HTML viewer: rendered text content and scroll offset.
     pub html_viewer: Option<(String, u16)>,
+    /// Receiver for a pending background AI reply generation, if any.
+    pub ai_rx: Option<std::sync::mpsc::Receiver<crate::ai::AiResult>>,
+    /// True while an AI reply is being generated in the background.
+    pub ai_generating: bool,
 }
 
 /// Settings modal state.
@@ -336,6 +340,7 @@ pub struct SettingsState {
     pub field: crate::settings::SettingsField,
     pub auto_refresh_secs: tui_input::Input,
     pub browser: tui_input::Input,
+    pub ai_model: tui_input::Input,
     pub draft: crate::settings::Settings,
 }
 
@@ -345,6 +350,7 @@ impl SettingsState {
             field: crate::settings::SettingsField::AutoRefreshSecs,
             auto_refresh_secs: tui_input::Input::new(s.auto_refresh_secs.to_string()),
             browser: tui_input::Input::new(s.browser.clone()),
+            ai_model: tui_input::Input::new(s.ai_model.clone()),
             draft: s.clone(),
         }
     }
@@ -593,6 +599,8 @@ impl App {
             file_picker: None,
             attachment_viewer: None,
             html_viewer: None,
+            ai_rx: None,
+            ai_generating: false,
         };
         app.refresh_messages();
         if app.accounts.is_empty() {
@@ -652,6 +660,38 @@ impl App {
         self.messages.get(self.message_idx)
     }
 
+    /// Non-blocking check for a finished background AI reply; inserts it at the
+    /// compose body cursor when it arrives.
+    fn poll_ai_reply(&mut self) {
+        if !self.ai_generating {
+            return;
+        }
+        let received = match self.ai_rx.as_ref() {
+            Some(rx) => match rx.try_recv() {
+                Ok(result) => Some(Ok(result)),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(())),
+            },
+            None => Some(Err(())),
+        };
+        let Some(outcome) = received else { return };
+        self.ai_generating = false;
+        self.ai_rx = None;
+        match outcome {
+            Ok(Ok(reply)) => {
+                if let Some(c) = self.compose.as_mut() {
+                    c.field = ComposeField::Body;
+                    c.body.insert_str(&reply);
+                    self.set_status("AI reply inserted");
+                } else {
+                    self.set_status("AI reply ready (compose closed)");
+                }
+            }
+            Ok(Err(e)) => self.set_status(format!("AI: {e}")),
+            Err(()) => self.set_status("AI generation failed"),
+        }
+    }
+
     fn maybe_mark_read_after_dwell(&mut self) {
         if !self.settings.mark_read_on_open {
             return;
@@ -707,6 +747,7 @@ impl App {
     pub fn tick(&mut self) {
         self.ticks = self.ticks.wrapping_add(1);
         self.backend_status = self.data.status();
+        self.poll_ai_reply();
         // Drain one notification per tick and surface it as a toast.
         if self.status.is_empty() {
             if let Some(notif) = self.data.pop_notification() {
@@ -855,6 +896,7 @@ impl App {
                         if accept_numeric(key) { s.auto_refresh_secs.handle_event(&evt); }
                     }
                     SettingsField::Browser => { s.browser.handle_event(&evt); }
+                    SettingsField::AiModel => { s.ai_model.handle_event(&evt); }
                     _ => {}
                 }
             }
@@ -1047,8 +1089,8 @@ impl App {
             }
             KeyAction::SaveSettings => self.save_settings(),
             KeyAction::SettingsToggle => self.toggle_setting_field(),
-            KeyAction::ThemeCycleLeft => self.cycle_theme(-1),
-            KeyAction::ThemeCycleRight => self.cycle_theme(1),
+            KeyAction::ThemeCycleLeft => self.settings_cycle(-1),
+            KeyAction::ThemeCycleRight => self.settings_cycle(1),
             KeyAction::OpenAccounts => self.open_accounts(),
             KeyAction::CloseAccounts => {
                 self.accounts_state = None;
@@ -1073,7 +1115,98 @@ impl App {
             KeyAction::AttachmentView => self.attachment_view_open(),
             KeyAction::AttachmentSave => self.attachment_save(),
             KeyAction::AttachmentClose => self.attachment_close(),
+            KeyAction::AiGenerateReply => self.ai_generate_reply(),
         }
+    }
+
+    /// Cycle the value of the currently-selected settings field (←/→).
+    fn settings_cycle(&mut self, dir: i32) {
+        use crate::settings::SettingsField;
+        let field = match self.settings_state.as_ref() {
+            Some(s) => s.field,
+            None => return,
+        };
+        match field {
+            SettingsField::Theme => self.cycle_theme(dir),
+            SettingsField::AiProvider => {
+                if let Some(state) = self.settings_state.as_mut() {
+                    state.draft.ai_provider = if dir >= 0 {
+                        state.draft.ai_provider.next()
+                    } else {
+                        state.draft.ai_provider.prev()
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Kick off a background AI reply generation for the open compose modal.
+    /// Empty body => reply from the thread; non-empty => refine the user's notes
+    /// using the thread. Result is inserted at the body cursor when it arrives.
+    fn ai_generate_reply(&mut self) {
+        if self.ai_generating {
+            self.set_status("Already generating...");
+            return;
+        }
+        let compose = match self.compose.as_ref() {
+            Some(c) => c,
+            None => return,
+        };
+        let body_text = compose.body.lines().join("\n");
+        let (user_notes, quoted) = crate::ai::split_notes_and_quote(&body_text);
+
+        let acc = self.accounts.get(compose.from_idx).map(|a| &a.account);
+        let my_name = acc.map(|a| a.display_name.clone()).unwrap_or_default();
+        let my_email = acc.map(|a| a.address.email.clone()).unwrap_or_default();
+        let subject_fallback = compose.subject.value().to_string();
+
+        let msg = self.current_message().cloned();
+        let body = self.current_body.clone();
+
+        let original = body
+            .as_ref()
+            .map(crate::ai::body_to_text)
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| crate::ai::unquote(&quoted));
+
+        let (from, subject, date) = match &msg {
+            Some(m) => (
+                m.headers.from.first().map(|a| a.format()).unwrap_or_default(),
+                m.headers.subject.clone(),
+                m.headers.date.format("%Y-%m-%d %H:%M").to_string(),
+            ),
+            None => (String::new(), subject_fallback, String::new()),
+        };
+
+        if original.trim().is_empty() && user_notes.trim().is_empty() {
+            self.set_status("Nothing to work from - reply to a message or type some notes first");
+            return;
+        }
+
+        let ctx = crate::ai::ReplyContext {
+            my_name,
+            my_email,
+            from,
+            subject,
+            date,
+            original,
+            user_notes,
+        };
+        let prompt = crate::ai::build_prompt(&ctx);
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.ai_rx = Some(rx);
+        self.ai_generating = true;
+        self.set_status(format!(
+            "Generating reply with {}...",
+            self.settings.ai_provider.label()
+        ));
+        crate::ai::spawn_generate(
+            self.settings.ai_provider,
+            self.settings.ai_model.clone(),
+            prompt,
+            tx,
+        );
     }
 
     fn file_picker_toggle(&mut self) {
@@ -1262,6 +1395,7 @@ impl App {
             .parse::<u32>()
             .unwrap_or(self.settings.auto_refresh_secs);
         new_settings.browser = state.browser.value().to_string();
+        new_settings.ai_model = state.ai_model.value().trim().to_string();
         if let Some(cb) = self.on_settings_changed.clone() {
             cb(&new_settings);
         }

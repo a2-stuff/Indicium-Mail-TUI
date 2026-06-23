@@ -16,6 +16,10 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
     let area = centered(full, 80, 80);
     f.render_widget(Clear, area);
 
+    // Read app-level flags before the mutable borrow of `app.compose` below.
+    let ai_generating = app.ai_generating;
+    let ai_spinner = app.spinner_frame();
+
     let outer = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -57,12 +61,17 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
     render_input(f, chunks[4], "Subject", compose.subject.value(), compose.field == ComposeField::Subject);
 
     let body_focused = compose.field == ComposeField::Body;
+    let body_title = if ai_generating {
+        format!(" Body  {ai_spinner} generating reply... ")
+    } else {
+        " Body ".to_string()
+    };
     compose.body.set_block(
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(if body_focused { theme::border_focused() } else { theme::border() })
-            .title(Span::styled(" Body ", if body_focused { theme::accent() } else { theme::muted() })),
+            .title(Span::styled(body_title, if body_focused { theme::accent() } else { theme::muted() })),
     );
     f.render_widget(&compose.body, chunks[5]);
 
@@ -82,6 +91,8 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
         Span::styled(" send  ", theme::muted()),
         Span::styled("Ctrl-D", theme::accent()),
         Span::styled(" save draft  ", theme::muted()),
+        Span::styled("Ctrl-I", theme::accent()),
+        Span::styled(" AI reply  ", theme::muted()),
         Span::styled("Tab", theme::accent()),
         Span::styled(" next field  ", theme::muted()),
         Span::styled("Esc", theme::accent()),
