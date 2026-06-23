@@ -61,6 +61,8 @@ pub struct ComposeState {
     pub drag: Option<ComposeDrag>,
     /// Last rendered body inner width, used for hard-wrapping.
     pub wrap_width: u16,
+    /// When Some, the "Instruction or Context" dialog is open (Ctrl-Shift-G).
+    pub instruction: Option<Input>,
 }
 
 impl ComposeState {
@@ -83,6 +85,7 @@ impl ComposeState {
             area: None,
             drag: None,
             wrap_width: 0,
+            instruction: None,
         }
     }
 
@@ -1014,6 +1017,33 @@ impl App {
             return;
         }
         if self.mode == Mode::Compose {
+            // The "Instruction or Context" dialog captures all input while open.
+            let dialog_open = self.compose.as_ref().map(|c| c.instruction.is_some()).unwrap_or(false);
+            if dialog_open {
+                match key.code {
+                    crossterm::event::KeyCode::Esc => {
+                        if let Some(c) = self.compose.as_mut() {
+                            c.instruction = None;
+                        }
+                        self.set_status("Instruction cancelled");
+                    }
+                    crossterm::event::KeyCode::Enter => {
+                        let instr = self
+                            .compose
+                            .as_mut()
+                            .and_then(|c| c.instruction.take())
+                            .map(|i| i.value().to_string())
+                            .unwrap_or_default();
+                        self.ai_generate_reply(instr);
+                    }
+                    _ => {
+                        if let Some(inp) = self.compose.as_mut().and_then(|c| c.instruction.as_mut()) {
+                            inp.handle_event(&crossterm::event::Event::Key(key));
+                        }
+                    }
+                }
+                return;
+            }
             if let Some(action) = map_key(self.focus, self.mode, key) {
                 self.dispatch(action);
                 return;
@@ -1290,7 +1320,12 @@ impl App {
             KeyAction::AttachmentView => self.attachment_view_open(),
             KeyAction::AttachmentSave => self.attachment_save(),
             KeyAction::AttachmentClose => self.attachment_close(),
-            KeyAction::AiGenerateReply => self.ai_generate_reply(),
+            KeyAction::AiGenerateReply => self.ai_generate_reply(String::new()),
+            KeyAction::AiReplyWithInstructions => {
+                if let Some(c) = self.compose.as_mut() {
+                    c.instruction = Some(Input::default());
+                }
+            }
             KeyAction::OpenMenu => self.open_menu(),
             KeyAction::OpenThread => self.open_thread(),
             KeyAction::CloseThread => {
@@ -1552,7 +1587,7 @@ impl App {
     /// Kick off a background AI reply generation for the open compose modal.
     /// Empty body => reply from the thread; non-empty => refine the user's notes
     /// using the thread. Result is inserted at the body cursor when it arrives.
-    fn ai_generate_reply(&mut self) {
+    fn ai_generate_reply(&mut self, instruction: String) {
         if self.ai_generating {
             self.set_status("Already generating...");
             return;
@@ -1600,6 +1635,7 @@ impl App {
             date,
             original,
             user_notes,
+            instruction,
         };
         let prompt = crate::ai::build_prompt(&ctx);
         let (tx, rx) = std::sync::mpsc::channel();

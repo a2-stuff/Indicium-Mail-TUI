@@ -1,6 +1,6 @@
 //! Compose modal popup.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -109,6 +109,8 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
         Span::styled(" save draft  ", theme::muted()),
         Span::styled("Ctrl-G", theme::accent()),
         Span::styled(" AI reply  ", theme::muted()),
+        Span::styled("Ctrl-Shift-G", theme::accent()),
+        Span::styled(" +context  ", theme::muted()),
         Span::styled("Tab", theme::accent()),
         Span::styled(" next field  ", theme::muted()),
         Span::styled("Esc", theme::accent()),
@@ -120,6 +122,50 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
     ]))
     .style(theme::status());
     f.render_widget(footer, chunks[7]);
+
+    if let Some(inp) = compose.instruction.as_ref() {
+        render_instruction_dialog(f, full, inp.value());
+    }
+}
+
+/// Small centered "Instruction or Context" dialog for an AI reply (Ctrl-Shift-G).
+fn render_instruction_dialog(f: &mut Frame, full: Rect, value: &str) {
+    let w = full.width.saturating_sub(4).min(64).max(20);
+    let h = 5u16.min(full.height.max(5));
+    let x = full.x + full.width.saturating_sub(w) / 2;
+    let y = full.y + full.height.saturating_sub(h) / 2;
+    let area = Rect { x, y, width: w, height: h };
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::border_focused())
+        .title(Span::styled(" Instruction or Context ", theme::accent()))
+        .style(Style::default().bg(theme::POPUP_BG));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+
+    let field_w = rows[0].width.max(1) as usize;
+    let len = value.chars().count();
+    let scroll = len.saturating_sub(field_w.saturating_sub(1));
+    let shown: String = value.chars().skip(scroll).collect();
+    f.render_widget(Paragraph::new(shown).style(theme::normal()), rows[0]);
+    // Caret.
+    let cx = rows[0].x + (len - scroll).min(field_w.saturating_sub(1)) as u16;
+    f.set_cursor_position((cx, rows[0].y));
+
+    let hint = Paragraph::new(Span::styled(
+        "[Enter] generate   [Esc] cancel",
+        theme::muted(),
+    ))
+    .alignment(Alignment::Center);
+    f.render_widget(hint, rows[2]);
 }
 
 fn render_field(f: &mut Frame, area: Rect, label: &str, value: &str, focused: bool, secondary: bool) {

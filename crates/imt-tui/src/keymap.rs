@@ -196,6 +196,7 @@ pub enum KeyAction {
     AttachmentClose,
     CloseHtmlViewer,
     AiGenerateReply,
+    AiReplyWithInstructions,
     OpenMenu,
     OpenThread,
     CloseThread,
@@ -355,10 +356,15 @@ fn map_file_picker(key: KeyEvent) -> Option<KeyAction> {
 
 fn map_compose(key: KeyEvent) -> Option<KeyAction> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     match key.code {
         KeyCode::Char('s') if ctrl => Some(KeyAction::Send),
         KeyCode::Char('d') if ctrl => Some(KeyAction::SaveDraft),
         KeyCode::Char('a') if ctrl => Some(KeyAction::AddAttachment),
+        // Ctrl-Shift-G: AI reply WITH an extra instruction/context prompt.
+        // Only distinguishable from Ctrl-G when the terminal supports the
+        // enhanced keyboard protocol. Match 'g' or 'G' to be safe.
+        KeyCode::Char('g') | KeyCode::Char('G') if ctrl && shift => Some(KeyAction::AiReplyWithInstructions),
         // NOTE: Ctrl-I cannot be used - terminals send it as Tab (0x09),
         // indistinguishable from the focus-next key. Ctrl-G ("Generate").
         KeyCode::Char('g') if ctrl => Some(KeyAction::AiGenerateReply),

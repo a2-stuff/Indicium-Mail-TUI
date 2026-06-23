@@ -140,7 +140,7 @@ Global flags: `--db <path>`, `--config <path>`, `--log-file <path>`.
 | `?` | help overlay |
 | `q` | quit |
 
-In compose: `Tab` next field, `Ctrl-G` AI reply, `Ctrl-A` file picker, `Ctrl-S` send, `Ctrl-D` save draft, `Esc` cancel. Drag the title bar to move the window and the bottom-right corner to resize it; the body word-wraps to the window width.
+In compose: `Tab` next field, `Ctrl-G` AI reply, `Ctrl-Shift-G` AI reply with an instruction/context prompt, `Ctrl-A` file picker, `Ctrl-S` send, `Ctrl-D` save draft, `Esc` cancel. Drag the title bar to move the window and the bottom-right corner to resize it; the body word-wraps to the window width.
 
 ## Mouse
 
@@ -159,6 +159,12 @@ Pick the provider and model in Settings (`,` → AI reply provider / AI model):
 - Model is provider-specific; leave it empty for the CLI's default. The default is Claude with the `sonnet` alias, which always tracks the latest Sonnet.
 
 Generation runs in the background and is inserted at the cursor when ready.
+
+Press `Ctrl-Shift-G` instead to open an **Instruction or Context** dialog: type an
+extra instruction (e.g. "keep it short and decline politely") and press Enter -
+the reply uses the email/thread plus your typed notes plus that instruction.
+This requires a terminal with the enhanced keyboard protocol (kitty, foot,
+WezTerm, ghostty, recent xterm); otherwise Ctrl-Shift-G behaves like Ctrl-G.
 
 In attachment viewer: `j/k` or arrows scroll, `Enter` or `v` view inline, `s` save to disk, `Esc`/`q` close.
 

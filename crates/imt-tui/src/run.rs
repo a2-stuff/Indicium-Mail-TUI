@@ -6,10 +6,12 @@ use std::time::Duration;
 
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
+    LeaveAlternateScreen,
 };
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
@@ -19,7 +21,10 @@ use crate::app::App;
 use crate::data::DataSource;
 use crate::ui;
 
-struct TerminalGuard;
+struct TerminalGuard {
+    /// Whether the enhanced keyboard protocol was pushed (so we can pop it).
+    kbd_enhanced: bool,
+}
 
 impl TerminalGuard {
     fn new() -> anyhow::Result<Self> {
@@ -27,12 +32,25 @@ impl TerminalGuard {
         // Mouse capture enables dragging the compose window and resizing panes.
         // Most terminals still allow native text selection via Shift+drag.
         execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
-        Ok(Self)
+        // Enhanced keyboard reporting lets us distinguish e.g. Ctrl-Shift-G from
+        // Ctrl-G. Only enable where the terminal supports it, so terminals that
+        // don't are unaffected (Ctrl-Shift-G simply behaves like Ctrl-G there).
+        let kbd_enhanced = supports_keyboard_enhancement().unwrap_or(false);
+        if kbd_enhanced {
+            let _ = execute!(
+                stdout(),
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            );
+        }
+        Ok(Self { kbd_enhanced })
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        if self.kbd_enhanced {
+            let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+        }
         let _ = disable_raw_mode();
         let _ = execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen);
     }

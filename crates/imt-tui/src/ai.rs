@@ -27,6 +27,8 @@ pub struct ReplyContext {
     pub original: String,
     /// Anything the user already typed in the body (key points / partial draft).
     pub user_notes: String,
+    /// Extra instruction / context the user gave for this reply (optional).
+    pub instruction: String,
 }
 
 /// Build the prompt fed to the provider CLI.
@@ -76,6 +78,15 @@ Keep every concrete detail the user provided; do not drop or contradict any of t
         p.push_str("--- USER'S NOTES / DRAFT ---\n");
         p.push_str(ctx.user_notes.trim());
         p.push_str("\n--- END NOTES ---");
+    }
+
+    if !ctx.instruction.trim().is_empty() {
+        p.push_str(
+            "\n\nAdditional instruction / context from the user for this reply - follow it \
+while still respecting the email thread above:\n--- INSTRUCTION ---\n",
+        );
+        p.push_str(ctx.instruction.trim());
+        p.push_str("\n--- END INSTRUCTION ---");
     }
     p
 }
