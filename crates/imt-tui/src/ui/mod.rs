@@ -27,7 +27,6 @@ use crate::keymap::Mode;
 pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = layout::root_layout(f.area());
     menubar::render_menu_bar(f, chunks.menu_bar, app);
-    menubar::render_actions_bar(f, chunks.actions_bar, app);
     sidebar::render(f, chunks.sidebar, app);
     list::render(f, chunks.list, app);
     reader::render(f, chunks.reader, app);

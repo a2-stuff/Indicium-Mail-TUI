@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use crate::app::App;
 use crate::keymap::Mode;
-use crate::menu::{ACTIONS, MENUS};
+use crate::menu::MENUS;
 use crate::theme;
 
 /// Width in cells of a menu-bar label segment (" Label ").
@@ -16,16 +16,14 @@ fn seg_width(label: &str) -> u16 {
     label.chars().count() as u16 + 2
 }
 
-/// Render the top application menu bar (row 0).
+/// Render the top application menu bar.
 pub fn render_menu_bar(f: &mut Frame, area: Rect, app: &App) {
     let in_menu = app.mode == Mode::Menu;
-    let ms = app.menu_state;
-    let active_row0 = in_menu && ms.map(|m| m.row == 0).unwrap_or(false);
-    let sel = ms.map(|m| m.col).unwrap_or(usize::MAX);
+    let sel = app.menu_state.map(|m| m.col).unwrap_or(usize::MAX);
 
     let mut spans: Vec<Span> = Vec::new();
     for (i, m) in MENUS.iter().enumerate() {
-        let selected = active_row0 && i == sel;
+        let selected = in_menu && i == sel;
         let caret = if m.items.is_empty() { "" } else { " \u{25be}" }; // ▾
         let text = format!(" {}{} ", m.label, caret);
         let style = if selected {
@@ -40,37 +38,13 @@ pub fn render_menu_bar(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(p, area);
 }
 
-/// Render the email-actions bar (row 1).
-pub fn render_actions_bar(f: &mut Frame, area: Rect, app: &App) {
-    let in_menu = app.mode == Mode::Menu;
-    let ms = app.menu_state;
-    let active_row1 = in_menu && ms.map(|m| m.row == 1).unwrap_or(false);
-    let sel = ms.map(|m| m.col).unwrap_or(usize::MAX);
-
-    let mut spans: Vec<Span> = Vec::new();
-    for (i, a) in ACTIONS.iter().enumerate() {
-        let selected = active_row1 && i == sel;
-        if selected {
-            spans.push(Span::styled(
-                format!(" {} ", a.label),
-                theme::selected().add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            spans.push(Span::styled(format!(" {}", a.label), theme::normal()));
-            spans.push(Span::styled(format!("({}) ", a.key_hint), theme::muted()));
-        }
-    }
-    let p = Paragraph::new(Line::from(spans)).style(theme::status());
-    f.render_widget(p, area);
-}
-
 /// Render the dropdown for the currently-open top menu, if any.
 pub fn render_dropdown(f: &mut Frame, menu_bar: Rect, app: &App) {
     if app.mode != Mode::Menu {
         return;
     }
     let ms = match app.menu_state {
-        Some(m) if m.row == 0 && m.open => m,
+        Some(m) if m.open => m,
         _ => return,
     };
     let menu = match MENUS.get(ms.col) {

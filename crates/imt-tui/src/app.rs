@@ -1135,9 +1135,9 @@ impl App {
         self.mode = Mode::Menu;
     }
 
-    /// Handle a key while the menu/actions bar is active.
+    /// Handle a key while the menu bar is active.
     fn handle_menu_key(&mut self, key: KeyEvent) {
-        use crate::menu::{ACTIONS, MENUS};
+        use crate::menu::MENUS;
         use crossterm::event::KeyCode;
         let mut ms = match self.menu_state {
             Some(s) => s,
@@ -1146,78 +1146,53 @@ impl App {
                 return;
             }
         };
-        let row_len = |row: u8| if row == 0 { MENUS.len() } else { ACTIONS.len() };
+        let n = MENUS.len();
         match key.code {
             KeyCode::Esc | KeyCode::F(10) => {
                 self.menu_state = None;
                 self.mode = Mode::Normal;
                 return;
             }
-            KeyCode::Tab => {
-                ms.open = false;
-                ms.item = 0;
-                ms.row = 1 - ms.row;
-                ms.col = 0;
-            }
-            KeyCode::Left => {
-                let n = row_len(ms.row);
+            KeyCode::Left | KeyCode::BackTab => {
                 ms.col = (ms.col + n - 1) % n;
                 ms.item = 0;
-                if ms.row == 0 && MENUS[ms.col].items.is_empty() {
-                    ms.open = false;
-                }
+                ms.open = ms.open && !MENUS[ms.col].items.is_empty();
             }
-            KeyCode::Right => {
-                let n = row_len(ms.row);
+            KeyCode::Right | KeyCode::Tab => {
                 ms.col = (ms.col + 1) % n;
                 ms.item = 0;
-                if ms.row == 0 && MENUS[ms.col].items.is_empty() {
-                    ms.open = false;
-                }
+                ms.open = ms.open && !MENUS[ms.col].items.is_empty();
             }
             KeyCode::Down => {
-                if ms.row == 0 {
-                    if ms.open {
-                        let n = MENUS[ms.col].items.len().max(1);
-                        ms.item = (ms.item + 1) % n;
-                    } else if !MENUS[ms.col].items.is_empty() {
-                        ms.open = true;
-                        ms.item = 0;
-                    } else {
-                        // direct-action top item: drop to actions bar
-                        ms.row = 1;
-                        ms.col = 0;
-                    }
+                if ms.open {
+                    let len = MENUS[ms.col].items.len().max(1);
+                    ms.item = (ms.item + 1) % len;
+                } else if !MENUS[ms.col].items.is_empty() {
+                    ms.open = true;
+                    ms.item = 0;
                 }
             }
             KeyCode::Up => {
-                if ms.row == 0 && ms.open {
+                if ms.open {
                     if ms.item == 0 {
                         ms.open = false;
                     } else {
                         ms.item -= 1;
                     }
-                } else if ms.row == 1 {
-                    ms.row = 0;
-                    ms.col = ms.col.min(MENUS.len() - 1);
                 }
             }
             KeyCode::Enter => {
-                let action = if ms.row == 0 {
-                    let m = &MENUS[ms.col];
-                    if !m.items.is_empty() {
-                        if ms.open {
-                            Some(m.items[ms.item].action)
-                        } else {
-                            ms.open = true;
-                            ms.item = 0;
-                            None
-                        }
+                let m = &MENUS[ms.col];
+                let action = if !m.items.is_empty() {
+                    if ms.open {
+                        Some(m.items[ms.item].action)
                     } else {
-                        m.action
+                        ms.open = true;
+                        ms.item = 0;
+                        None
                     }
                 } else {
-                    ACTIONS.get(ms.col).map(|i| i.action)
+                    m.action
                 };
                 if let Some(a) = action {
                     self.menu_state = None;

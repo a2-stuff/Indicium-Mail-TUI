@@ -1,6 +1,6 @@
-//! Top menu bar (app functions, with dropdowns) and the email-actions bar.
-//! Entries map to existing `KeyAction`s so the menus reuse the same handlers
-//! as the keyboard shortcuts.
+//! Top menu bar (app functions, with dropdowns). Entries map to existing
+//! `KeyAction`s so the menus reuse the same handlers as the keyboard shortcuts.
+//! Email actions (compose/reply/...) live in the footer, not a second bar.
 
 use crate::keymap::KeyAction;
 
@@ -36,27 +36,12 @@ pub const MENUS: &[TopMenu] = &[
     TopMenu { label: "Quit",     items: &[], action: Some(KeyAction::Quit) },
 ];
 
-/// Row 1 - email actions for the selected message.
-pub const ACTIONS: &[MenuItem] = &[
-    MenuItem { label: "Compose",     key_hint: "c", action: KeyAction::Compose },
-    MenuItem { label: "Reply",       key_hint: "r", action: KeyAction::Reply },
-    MenuItem { label: "Reply All",   key_hint: "R", action: KeyAction::ReplyAll },
-    MenuItem { label: "Forward",     key_hint: "f", action: KeyAction::Forward },
-    MenuItem { label: "Mark Read",   key_hint: "u", action: KeyAction::ToggleRead },
-    MenuItem { label: "Flag",        key_hint: "s", action: KeyAction::ToggleFlag },
-    MenuItem { label: "Attachments", key_hint: "a", action: KeyAction::OpenAttachments },
-    MenuItem { label: "Move",        key_hint: "v", action: KeyAction::OpenMoveModal },
-    MenuItem { label: "Delete",      key_hint: "d", action: KeyAction::Delete },
-];
-
-/// Interactive state of the menu/actions bars while in `Mode::Menu`.
+/// Interactive state of the menu bar while in `Mode::Menu`.
 #[derive(Debug, Clone, Copy)]
 pub struct MenuState {
-    /// 0 = top menu bar, 1 = actions bar.
-    pub row: u8,
-    /// Selected column within the current row.
+    /// Selected top-level menu.
     pub col: usize,
-    /// Whether the current top-menu dropdown is open (row 0 only).
+    /// Whether the current menu's dropdown is open.
     pub open: bool,
     /// Selected item within the open dropdown.
     pub item: usize,
@@ -64,7 +49,7 @@ pub struct MenuState {
 
 impl MenuState {
     pub fn new() -> Self {
-        Self { row: 0, col: 0, open: false, item: 0 }
+        Self { col: 0, open: false, item: 0 }
     }
 }
 

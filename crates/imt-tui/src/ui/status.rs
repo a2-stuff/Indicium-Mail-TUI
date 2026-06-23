@@ -28,7 +28,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     };
     let hints = match app.mode {
         Mode::Normal => "[↑↓] move  [Enter] open  [Tab] pane  │  [c] compose  [r] reply  [a] attachments  │  [/] search  [F10] menu  [?] help  [q] quit",
-        Mode::Menu => "[←→] move  [↑↓] open / select  [Enter] run  [Tab] switch bar  [Esc] exit",
+        Mode::Menu => "[←→ / Tab] menus  [↑↓] open / select  [Enter] run  [Esc] exit",
         Mode::Compose => "[Tab] next  [Ctrl+G] AI reply  [Ctrl+S] send  [Ctrl+D] save  [Esc] cancel",
         Mode::Search => "[/] search  [Enter] jump  [Esc] cancel",
         Mode::Help => "[Esc] close",
