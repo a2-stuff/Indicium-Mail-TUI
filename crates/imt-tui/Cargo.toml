@@ -25,3 +25,7 @@ once_cell.workspace = true
 directories.workspace = true
 unicode-width = "0.2"
 uuid.workspace = true
+# Attachment viewers: image decode (half-block render), PDF + DOCX text extraction.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+pdf-extract = "0.7"
+zip = { version = "2", default-features = false, features = ["deflate"] }

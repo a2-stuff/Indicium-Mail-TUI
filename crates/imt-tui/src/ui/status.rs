@@ -13,6 +13,7 @@ use crate::theme;
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let mode = match app.mode {
         Mode::Normal => "NORMAL",
+        Mode::Menu => "MENU",
         Mode::Compose => "COMPOSE",
         Mode::Search => "SEARCH",
         Mode::Help => "HELP",
@@ -26,8 +27,9 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Mode::HtmlViewer => "HTML",
     };
     let hints = match app.mode {
-        Mode::Normal => "[c] compose  [Enter] open  [a] attachments  [s] important  [u] read  [m] accounts  [,] settings  [/] search  [?] help  [q] quit  [i] info",
-        Mode::Compose => "[Tab] next  [Ctrl+S] send  [Ctrl+D] save  [Esc] cancel",
+        Mode::Normal => "[↑↓] move  [Enter] open  [Tab] pane  │  [c] compose  [r] reply  [a] attachments  │  [/] search  [F10] menu  [?] help  [q] quit",
+        Mode::Menu => "[←→] move  [↑↓] open / select  [Enter] run  [Tab] switch bar  [Esc] exit",
+        Mode::Compose => "[Tab] next  [Ctrl+G] AI reply  [Ctrl+S] send  [Ctrl+D] save  [Esc] cancel",
         Mode::Search => "[/] search  [Enter] jump  [Esc] cancel",
         Mode::Help => "[Esc] close",
         Mode::Onboarding => "[Tab] next  [Shift-Tab] prev  [Ctrl+S] save  [Esc] cancel  [←/→] cycle",

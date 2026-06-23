@@ -6,7 +6,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{self, App, AttachmentViewMode};
+use crate::app::{App, AttachmentViewMode};
+use crate::attachments;
 use crate::theme;
 
 fn centered_pct(area: Rect, pw: u16, ph: u16) -> Rect {
@@ -35,7 +36,36 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             let att = av.attachments.get(*idx);
             render_content(f, modal, att.map(|a| a.filename.as_str()).unwrap_or("attachment"), content, *scroll)
         }
+        AttachmentViewMode::ViewingImage { idx, image } => {
+            let att = av.attachments.get(*idx);
+            render_image(f, modal, att.map(|a| a.filename.as_str()).unwrap_or("image"), image)
+        }
     }
+}
+
+fn render_image(f: &mut Frame, area: Rect, filename: &str, image: &image::DynamicImage) {
+    let block = Block::default()
+        .title(Span::styled(
+            format!("  {}  ", filename),
+            theme::accent().add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::border_focused());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let lines = attachments::image_to_lines(image, rows[0].width, rows[0].height);
+    let p = Paragraph::new(lines).alignment(Alignment::Center);
+    f.render_widget(p, rows[0]);
+
+    let footer = Paragraph::new(Span::styled(
+        " [s] save to Downloads  [Esc] back ",
+        theme::muted(),
+    ))
+    .alignment(Alignment::Center);
+    f.render_widget(footer, rows[1]);
 }
 
 fn render_list(f: &mut Frame, area: Rect, app: &App, selected: usize) {
@@ -57,9 +87,16 @@ fn render_list(f: &mut Frame, area: Rect, app: &App, selected: usize) {
     let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
 
     let items: Vec<ListItem> = av.attachments.iter().map(|att| {
-        let viewable = app::is_viewable(&att.mime_type, &att.filename);
+        let kind = attachments::classify(&att.mime_type, &att.filename);
+        let viewable = kind != attachments::AttachmentKind::Other;
         let has_data = att.temp_path.is_some();
-        let icon = if viewable { "" } else { "" };
+        let icon = match kind {
+            attachments::AttachmentKind::Image => "[img]",
+            attachments::AttachmentKind::Pdf => "[pdf]",
+            attachments::AttachmentKind::Docx => "[doc]",
+            attachments::AttachmentKind::Text => "[txt]",
+            attachments::AttachmentKind::Other => "[bin]",
+        };
         let size_str = format_size(att.size);
         let name = if att.filename.is_empty() { att.mime_type.clone() } else { att.filename.clone() };
         let action = if !has_data { " (no data)" } else if viewable { " [Enter] view" } else { " [s] save" };

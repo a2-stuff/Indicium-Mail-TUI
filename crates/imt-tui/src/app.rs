@@ -333,6 +333,8 @@ pub struct App {
     pub ai_rx: Option<std::sync::mpsc::Receiver<crate::ai::AiResult>>,
     /// True while an AI reply is being generated in the background.
     pub ai_generating: bool,
+    /// Interactive menu/actions-bar navigation state, when in `Mode::Menu`.
+    pub menu_state: Option<crate::menu::MenuState>,
 }
 
 /// Settings modal state.
@@ -379,8 +381,10 @@ const READ_DELAY_TICKS: u64 = 12; // 3 seconds at 250ms tick
 pub enum AttachmentViewMode {
     /// Listing attachments to pick one.
     Listing { selected: usize },
-    /// Showing the content of a single viewable attachment.
+    /// Showing the extracted text of a single attachment (text / PDF / DOCX).
     Viewing { idx: usize, content: String, scroll: u16 },
+    /// Showing a decoded image rendered as half-block cells.
+    ViewingImage { idx: usize, image: std::sync::Arc<image::DynamicImage> },
 }
 
 pub struct AttachmentViewerState {
@@ -601,6 +605,7 @@ impl App {
             html_viewer: None,
             ai_rx: None,
             ai_generating: false,
+            menu_state: None,
         };
         app.refresh_messages();
         if app.accounts.is_empty() {
@@ -832,6 +837,10 @@ impl App {
 
     /// Handle a raw key event.
     pub fn handle_key(&mut self, key: KeyEvent) {
+        if self.mode == Mode::Menu {
+            self.handle_menu_key(key);
+            return;
+        }
         if self.mode == Mode::FilePicker {
             if let Some(action) = map_key(self.focus, self.mode, key) {
                 self.dispatch(action);
@@ -1116,7 +1125,110 @@ impl App {
             KeyAction::AttachmentSave => self.attachment_save(),
             KeyAction::AttachmentClose => self.attachment_close(),
             KeyAction::AiGenerateReply => self.ai_generate_reply(),
+            KeyAction::OpenMenu => self.open_menu(),
         }
+    }
+
+    /// Open the interactive menu bar (Mode::Menu).
+    fn open_menu(&mut self) {
+        self.menu_state = Some(crate::menu::MenuState::new());
+        self.mode = Mode::Menu;
+    }
+
+    /// Handle a key while the menu/actions bar is active.
+    fn handle_menu_key(&mut self, key: KeyEvent) {
+        use crate::menu::{ACTIONS, MENUS};
+        use crossterm::event::KeyCode;
+        let mut ms = match self.menu_state {
+            Some(s) => s,
+            None => {
+                self.mode = Mode::Normal;
+                return;
+            }
+        };
+        let row_len = |row: u8| if row == 0 { MENUS.len() } else { ACTIONS.len() };
+        match key.code {
+            KeyCode::Esc | KeyCode::F(10) => {
+                self.menu_state = None;
+                self.mode = Mode::Normal;
+                return;
+            }
+            KeyCode::Tab => {
+                ms.open = false;
+                ms.item = 0;
+                ms.row = 1 - ms.row;
+                ms.col = 0;
+            }
+            KeyCode::Left => {
+                let n = row_len(ms.row);
+                ms.col = (ms.col + n - 1) % n;
+                ms.item = 0;
+                if ms.row == 0 && MENUS[ms.col].items.is_empty() {
+                    ms.open = false;
+                }
+            }
+            KeyCode::Right => {
+                let n = row_len(ms.row);
+                ms.col = (ms.col + 1) % n;
+                ms.item = 0;
+                if ms.row == 0 && MENUS[ms.col].items.is_empty() {
+                    ms.open = false;
+                }
+            }
+            KeyCode::Down => {
+                if ms.row == 0 {
+                    if ms.open {
+                        let n = MENUS[ms.col].items.len().max(1);
+                        ms.item = (ms.item + 1) % n;
+                    } else if !MENUS[ms.col].items.is_empty() {
+                        ms.open = true;
+                        ms.item = 0;
+                    } else {
+                        // direct-action top item: drop to actions bar
+                        ms.row = 1;
+                        ms.col = 0;
+                    }
+                }
+            }
+            KeyCode::Up => {
+                if ms.row == 0 && ms.open {
+                    if ms.item == 0 {
+                        ms.open = false;
+                    } else {
+                        ms.item -= 1;
+                    }
+                } else if ms.row == 1 {
+                    ms.row = 0;
+                    ms.col = ms.col.min(MENUS.len() - 1);
+                }
+            }
+            KeyCode::Enter => {
+                let action = if ms.row == 0 {
+                    let m = &MENUS[ms.col];
+                    if !m.items.is_empty() {
+                        if ms.open {
+                            Some(m.items[ms.item].action)
+                        } else {
+                            ms.open = true;
+                            ms.item = 0;
+                            None
+                        }
+                    } else {
+                        m.action
+                    }
+                } else {
+                    ACTIONS.get(ms.col).map(|i| i.action)
+                };
+                if let Some(a) = action {
+                    self.menu_state = None;
+                    self.mode = Mode::Normal;
+                    self.dispatch(a);
+                    return;
+                }
+            }
+            _ => {}
+        }
+        self.menu_state = Some(ms);
     }
 
     /// Cycle the value of the currently-selected settings field (←/→).
@@ -1445,32 +1557,55 @@ impl App {
         let av = match self.attachment_viewer.as_mut() { Some(s) => s, None => return };
         let idx = match &av.mode {
             AttachmentViewMode::Listing { selected } => *selected,
-            AttachmentViewMode::Viewing { .. } => { av.mode = AttachmentViewMode::Listing { selected: 0 }; return; }
+            // Pressing Enter while viewing returns to the listing.
+            _ => { av.mode = AttachmentViewMode::Listing { selected: 0 }; return; }
         };
         let att = match av.attachments.get(idx) { Some(a) => a.clone(), None => return };
-        let content = if let Some(path) = &att.temp_path {
-            match std::fs::read(path) {
-                Ok(bytes) => {
-                    if is_viewable(&att.mime_type, &att.filename) {
-                        match String::from_utf8(bytes.clone()) {
-                            Ok(s) => s,
-                            Err(_) => format!("[Binary content - {} bytes]\nSave with [s] to inspect externally.", bytes.len()),
-                        }
-                    } else {
-                        format!("[Binary file: {}]\nMIME type: {}\nSize: {} bytes\n\nPress [s] to save to Downloads.", att.filename, att.mime_type, att.size)
-                    }
-                }
-                Err(e) => format!("[Error reading attachment: {}]", e),
+        let path = match &att.temp_path {
+            Some(p) => p.clone(),
+            None => {
+                self.set_status("Attachment data not available - reopen the message to download it");
+                return;
             }
-        } else {
-            "[Attachment data not available - try re-opening the message]".to_string()
         };
-        av.mode = AttachmentViewMode::Viewing { idx, content, scroll: 0 };
+        let kind = crate::attachments::classify(&att.mime_type, &att.filename);
+        match kind {
+            crate::attachments::AttachmentKind::Image => {
+                match crate::attachments::load_image(&path) {
+                    Ok(img) => {
+                        if let Some(av) = self.attachment_viewer.as_mut() {
+                            av.mode = AttachmentViewMode::ViewingImage { idx, image: std::sync::Arc::new(img) };
+                        }
+                    }
+                    Err(e) => self.set_status(format!("Image: {e}")),
+                }
+            }
+            crate::attachments::AttachmentKind::Pdf
+            | crate::attachments::AttachmentKind::Docx
+            | crate::attachments::AttachmentKind::Text => {
+                self.set_status("Extracting...");
+                let content = crate::attachments::extract_text(&path, kind)
+                    .unwrap_or_else(|e| format!("[{e}]"));
+                if let Some(av) = self.attachment_viewer.as_mut() {
+                    av.mode = AttachmentViewMode::Viewing { idx, content, scroll: 0 };
+                }
+                self.clear_status();
+            }
+            crate::attachments::AttachmentKind::Other => {
+                let content = format!(
+                    "[Binary file: {}]\nMIME type: {}\nSize: {} bytes\n\nPress [s] to save to Downloads.",
+                    att.filename, att.mime_type, att.size
+                );
+                if let Some(av) = self.attachment_viewer.as_mut() {
+                    av.mode = AttachmentViewMode::Viewing { idx, content, scroll: 0 };
+                }
+            }
+        }
     }
 
     fn attachment_close(&mut self) {
         match self.attachment_viewer.as_ref().map(|av| &av.mode) {
-            Some(AttachmentViewMode::Viewing { .. }) => {
+            Some(AttachmentViewMode::Viewing { .. }) | Some(AttachmentViewMode::ViewingImage { .. }) => {
                 if let Some(av) = self.attachment_viewer.as_mut() {
                     av.mode = AttachmentViewMode::Listing { selected: 0 };
                 }
@@ -1487,6 +1622,7 @@ impl App {
         let idx = match &av.mode {
             AttachmentViewMode::Listing { selected } => *selected,
             AttachmentViewMode::Viewing { idx, .. } => *idx,
+            AttachmentViewMode::ViewingImage { idx, .. } => *idx,
         };
         let att = match av.attachments.get(idx) { Some(a) => a.clone(), None => return };
         let src = match &att.temp_path {
@@ -1639,6 +1775,7 @@ impl App {
                 match &mut av.mode {
                     AttachmentViewMode::Listing { selected } => { if *selected > 0 { *selected -= 1; } }
                     AttachmentViewMode::Viewing { scroll, .. } => { *scroll = scroll.saturating_sub(1); }
+                    AttachmentViewMode::ViewingImage { .. } => {}
                 }
             }
             return;
@@ -1690,6 +1827,7 @@ impl App {
                         if *selected + 1 < av.attachments.len() { *selected += 1; }
                     }
                     AttachmentViewMode::Viewing { scroll, .. } => { *scroll = scroll.saturating_add(1); }
+                    AttachmentViewMode::ViewingImage { .. } => {}
                 }
             }
             return;

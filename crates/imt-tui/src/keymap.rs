@@ -14,6 +14,7 @@ pub enum Focus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,
+    Menu,
     Compose,
     Search,
     Help,
@@ -194,11 +195,14 @@ pub enum KeyAction {
     AttachmentClose,
     CloseHtmlViewer,
     AiGenerateReply,
+    OpenMenu,
 }
 
 /// Translate a key event to a `KeyAction` in normal mode (compose mode handled separately).
 pub fn map_key(focus: Focus, mode: Mode, key: KeyEvent) -> Option<KeyAction> {
     match mode {
+        // Menu mode is handled inline in App::handle_key (stateful navigation).
+        Mode::Menu => None,
         Mode::Compose => map_compose(key),
         Mode::Help => map_help(key),
         Mode::Search => map_search(key),
@@ -281,6 +285,7 @@ fn map_normal(focus: Focus, key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('r') if ctrl => Some(KeyAction::Refresh),
         KeyCode::Char('l') if ctrl => Some(KeyAction::Refresh),
         KeyCode::F(5) => Some(KeyAction::Refresh),
+        KeyCode::F(10) => Some(KeyAction::OpenMenu),
         KeyCode::Char('r') if !shift && !ctrl => Some(KeyAction::Reply),
         KeyCode::Char('R') => Some(KeyAction::ReplyAll),
         KeyCode::Char('f') => Some(KeyAction::Forward),

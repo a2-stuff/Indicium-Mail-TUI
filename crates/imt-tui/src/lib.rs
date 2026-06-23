@@ -2,8 +2,10 @@
 
 pub mod ai;
 pub mod app;
+pub mod attachments;
 pub mod data;
 pub mod keymap;
+pub mod menu;
 pub mod presets;
 pub mod quote;
 pub mod run;

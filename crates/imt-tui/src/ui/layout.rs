@@ -2,19 +2,27 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-/// The four primary areas of the screen.
+/// The primary areas of the screen.
 pub struct RootChunks {
+    pub menu_bar: Rect,
+    pub actions_bar: Rect,
     pub sidebar: Rect,
     pub list: Rect,
     pub reader: Rect,
     pub status: Rect,
 }
 
-/// Compute the root layout for an area.
+/// Compute the root layout: menu bar + actions bar on top, the three-pane body
+/// in the middle, and the status/footer line at the bottom.
 pub fn root_layout(area: Rect) -> RootChunks {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1), // menu bar
+            Constraint::Length(1), // actions bar
+            Constraint::Min(1),    // main body
+            Constraint::Length(1), // status / footer
+        ])
         .split(area);
     let main = Layout::default()
         .direction(Direction::Horizontal)
@@ -23,12 +31,14 @@ pub fn root_layout(area: Rect) -> RootChunks {
             Constraint::Percentage(35),
             Constraint::Percentage(45),
         ])
-        .split(outer[0]);
+        .split(outer[2]);
     RootChunks {
+        menu_bar: outer[0],
+        actions_bar: outer[1],
         sidebar: main[0],
         list: main[1],
         reader: main[2],
-        status: outer[1],
+        status: outer[3],
     }
 }
 
