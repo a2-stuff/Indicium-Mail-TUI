@@ -5,31 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-06-23
-
-### Added
-- **Attachment indicator in the message list (all folders, including Sent).** Messages that carry attachments now show a 📎 before the subject, so you can spot attachment-bearing mail - including emails you sent - at a glance, without opening each one. Detection happens at sync time from the message's Content-Type (no body fetch needed) and is corrected to the exact value once the body is downloaded. New persisted `has_attachments` column (migration `0004`).
-
-## [0.4.1] - 2026-06-23
-
-### Added
-- **View attachments from the conversation thread view.** In the thread (`t`) modal, messages that have attachments are marked with a 📎; the selected message lists its attachment names above the body. Press `a` (or `Enter`) to open the attachment viewer for the selected thread message - images, PDF, and Word/text all render as in the reader. Closing the viewer returns to the conversation view.
-
-## [0.4.0] - 2026-06-23
-
-### Added
-- **AI reply can create and attach files.** When you ask the AI reply (e.g. via the `Ctrl-T` instruction dialog) to generate a file - a text/CSV/Excel/PDF/image/ZIP, etc. - the background model now runs in an isolated working directory and writes any final files into an `attachments/` folder; those files are automatically attached to the compose draft when the reply is inserted. The Claude provider runs with the file tools (Read/Write/Edit/Bash) auto-approved so it can write and run a small script to produce real binary files. The status line reports how many files were attached. The reply body no longer dumps the on-disk file path.
-- **MCP `send` and `reply` accept an `attachments` parameter.** Any MCP agent can attach files it created by passing a list of local file paths (or `{path, filename}` objects); the MIME type is inferred from the extension. Nonexistent paths return a clear error so the agent can correct them. This is the programmatic equivalent of the in-app auto-attach, for headless agent workflows.
-
-## [0.3.1] - 2026-06-23
-
-### Changed
-- **AI reply with extra instruction/context is now `Ctrl-T`** (was `Ctrl-Shift-G`). `Ctrl-T` is distinguishable in every terminal, so the "Instruction or Context" dialog works without needing the enhanced keyboard protocol. `Ctrl-Shift-G` still opens the same dialog on terminals that support the protocol.
-
 ## [0.3.0] - 2026-06-23
 
 ### Added
-- **AI reply with extra instruction/context** (`Ctrl-Shift-G`): opens an "Instruction or Context" dialog where you type an additional instruction (e.g. "keep it short, decline politely"); the reply is generated from the email/thread + your typed notes + that instruction. Requires a terminal that supports the enhanced keyboard protocol (the app enables it only when supported); otherwise `Ctrl-Shift-G` falls back to a normal `Ctrl-G` reply.
+- **AI reply with extra instruction/context** (`Ctrl-T`): opens an "Instruction or Context" dialog where you type an additional instruction (e.g. "keep it short, decline politely"); the reply is generated from the email/thread + your typed notes + that instruction. `Ctrl-T` works in every terminal; `Ctrl-Shift-G` opens the same dialog on terminals with the enhanced keyboard protocol.
+- **AI reply can create and attach files.** When you ask the AI reply to generate a file - a text/CSV/Excel/PDF/image/ZIP, etc. - the background model runs in an isolated working directory and writes any final files into an `attachments/` folder; those files are automatically attached to the compose draft when the reply is inserted. The Claude provider runs with the file tools (Read/Write/Edit/Bash) auto-approved so it can write and run a small script to produce real binary files. The status line reports how many files were attached, and the reply body no longer dumps the on-disk path.
+- **MCP `send` and `reply` accept an `attachments` parameter.** Any MCP agent can attach files it created by passing a list of local file paths (or `{path, filename}` objects); the MIME type is inferred from the extension and nonexistent paths return a clear error.
+- **View attachments from the conversation thread view.** In the thread (`t`) modal, messages with attachments are marked 📎 and the selected message lists its attachment names above the body. Press `a` (or `Enter`) to open the attachment viewer for the selected thread message; closing it returns to the conversation view.
+- **Attachment indicator in the message list (all folders, including Sent).** Messages that carry attachments show a 📎 before the subject, so attachment-bearing mail - including emails you sent - is visible at a glance without opening each one. Attachments are detected from the server's **BODYSTRUCTURE** (the exact MIME tree, no attachment bytes downloaded), with a Content-Type header heuristic as a fallback. The flag is persisted (`has_attachments`, migration `0004`) and corrected to the exact value once a body is downloaded. Each folder does a **one-time full rescan** on its next sync so pre-existing messages get the flag (tracked in `folder_attachment_scan`, migration `0005`), and a SQL backfill flags any message whose body was already downloaded.
+
+### Changed
+- The AI reply instruction dialog moved from `Ctrl-Shift-G` to `Ctrl-T` so it works on terminals without the enhanced keyboard protocol (`Ctrl-Shift-G` still works where supported).
 
 ## [0.2.0] - 2026-06-23
 

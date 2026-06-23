@@ -130,8 +130,14 @@ impl SyncEngine {
         });
 
         let state = backend.select_folder(&folder.path).await?;
+        // One-time full rescan so existing messages (synced before attachment
+        // detection) get their has_attachments flag set from BODYSTRUCTURE.
+        let need_attachment_scan = !FolderRepo::new(self.db.pool())
+            .attachments_scanned(folder_id)
+            .await
+            .unwrap_or(false);
         let last_uid_next = folder.uid_next;
-        let range = if last_uid_next == 0 || state.uid_next <= last_uid_next {
+        let range = if need_attachment_scan || last_uid_next == 0 || state.uid_next <= last_uid_next {
             imt_net::backend::UidRange::All
         } else {
             imt_net::backend::UidRange::Range(
@@ -190,6 +196,9 @@ impl SyncEngine {
             ..folder
         };
         folder_repo.upsert(&updated).await?;
+        if need_attachment_scan {
+            let _ = folder_repo.mark_attachments_scanned(folder_id).await;
+        }
         let _ = self.tx.send(SyncEvent::FolderCountsChanged {
             folder_id,
             total: state.exists,

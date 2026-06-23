@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_imap::imap_proto::{MailboxDatum, Response as ImapResponse};
+use async_imap::imap_proto::{BodyStructure, MailboxDatum, Response as ImapResponse};
 use async_imap::Authenticator;
 use async_imap::extensions::idle::{Handle as ImapIdleHandle, IdleResponse};
 use async_imap::types::{Fetch, Flag as ImapFlag, Name, NameAttribute};
@@ -376,11 +376,35 @@ fn flags_to_imap_list(flags: &[Flag]) -> String {
     format!("({})", inner.join(" "))
 }
 
+/// Walk a fetched BODYSTRUCTURE (the MIME tree, no body bytes) and decide
+/// whether the message carries an attachment: any non-text leaf part
+/// (`Basic`), an attached message (`message/rfc822`), or a text part marked
+/// `Content-Disposition: attachment`. Multipart containers recurse.
+fn bodystructure_has_attachments(bs: &BodyStructure) -> bool {
+    match bs {
+        BodyStructure::Multipart { bodies, .. } => {
+            bodies.iter().any(bodystructure_has_attachments)
+        }
+        // A non-text leaf (image/application/audio/video/...) is an attachment
+        // (this also covers inline images in multipart/related).
+        BodyStructure::Basic { .. } => true,
+        // An attached message/rfc822.
+        BodyStructure::Message { .. } => true,
+        // Plain text only counts if explicitly dispositioned as an attachment.
+        BodyStructure::Text { common, .. } => common
+            .disposition
+            .as_ref()
+            .map(|d| d.ty.eq_ignore_ascii_case("attachment"))
+            .unwrap_or(false),
+    }
+}
+
 /// Detect, from header bytes alone, whether a message likely carries
 /// attachments. Uses the top-level Content-Type: a `multipart/mixed` or
 /// `multipart/related` container is the standard wrapper when attachments (or
 /// inline images) are present. Avoids a body fetch; the exact attachment list
-/// replaces this once the full body is fetched.
+/// replaces this once the full body is fetched. Used as a fallback when the
+/// server does not return BODYSTRUCTURE.
 fn header_has_attachments(bytes: &[u8]) -> bool {
     let Some(parsed) = MessageParser::default().parse(bytes) else {
         return false;
@@ -403,7 +427,12 @@ fn fetch_to_envelope(f: &Fetch) -> Result<EnvelopeFetch> {
         .header()
         .ok_or_else(|| NetError::Protocol("fetch missing header".into()))?;
     let headers = parse_headers_from_bytes(header_bytes)?;
-    let has_attachments = header_has_attachments(header_bytes);
+    // Prefer BODYSTRUCTURE (exact MIME tree, no body bytes); fall back to the
+    // Content-Type header heuristic if the server did not return it.
+    let has_attachments = match f.bodystructure() {
+        Some(bs) => bodystructure_has_attachments(bs),
+        None => header_has_attachments(header_bytes),
+    };
 
     let flags: Vec<Flag> = f.flags().filter_map(|fl| convert_flag(&fl)).collect();
     let size = f.size.unwrap_or(0) as u64;
@@ -608,7 +637,7 @@ impl MailBackend for ImapBackend {
         let stream = session
             .uid_fetch(
                 set,
-                "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER])",
+                "(UID FLAGS RFC822.SIZE INTERNALDATE BODYSTRUCTURE BODY.PEEK[HEADER])",
             )
             .await
             .map_err(|e| NetError::Protocol(e.to_string()))?;

@@ -278,7 +278,14 @@ async fn sync_one_folder<B: MailBackend>(
         .map(|s| s.uid_validity != 0 && s.uid_validity != state.uid_validity)
         .unwrap_or(false);
 
-    let range = if needs_full_resync || last_uid_next == 0 {
+    // One-time full rescan so messages synced before attachment detection get
+    // their has_attachments flag set from BODYSTRUCTURE.
+    let need_attachment_scan = !folder_repo
+        .attachments_scanned(folder.id)
+        .await
+        .unwrap_or(false);
+
+    let range = if needs_full_resync || last_uid_next == 0 || need_attachment_scan {
         if state.uid_next > 1 {
             UidRange::Range(1, state.uid_next.saturating_sub(1).max(1))
         } else {
@@ -354,6 +361,9 @@ async fn sync_one_folder<B: MailBackend>(
         .upsert(&updated)
         .await
         .map_err(|e| SyncErrorReason::Other(format!("update folder counts: {}", e)))?;
+    if need_attachment_scan {
+        let _ = folder_repo.mark_attachments_scanned(folder.id).await;
+    }
     let _ = ctx.tx.send(SyncEvent::FolderCountsChanged {
         folder_id: folder.id,
         total: state.exists,
