@@ -86,25 +86,73 @@ impl ComposeState {
         }
     }
 
-    /// Replace the body text (rebuilds the editor), placing the cursor at the end.
+    /// Replace the body text (rebuilds the editor), cursor at the top.
     pub fn set_body_text(&mut self, text: &str) {
-        let mut body = build_body_textarea(text);
-        body.move_cursor(tui_textarea::CursorMove::Bottom);
-        body.move_cursor(tui_textarea::CursorMove::End);
-        self.body = body;
+        self.body = build_body_textarea(text);
     }
 
-    /// Hard-wrap the body to the current wrap width (if known), preserving quotes.
-    pub fn rewrap_body(&mut self) {
+    /// Effective wrap width (falls back to 72 if the body hasn't been laid out).
+    fn effective_wrap_width(&self) -> usize {
         let w = self.wrap_width as usize;
-        if w < 8 {
-            return;
+        if w >= 8 {
+            w
+        } else {
+            72
         }
+    }
+
+    /// Hard-wrap the body to the wrap width, breaking over-long lines at word
+    /// boundaries while preserving the user's own line breaks (signatures, etc.).
+    /// Used on resize / AI insert / send. Cursor returns to the top.
+    pub fn rewrap_body(&mut self) {
+        let w = self.effective_wrap_width();
         let text = self.body.lines().join("\n");
-        let wrapped = crate::ai::wrap_body(&text, w);
+        let wrapped = crate::ai::break_long_lines(&text, w);
         if wrapped != text {
             self.set_body_text(&wrapped);
         }
+    }
+
+    /// Live wrap while typing: break over-long lines at word boundaries without
+    /// reflowing the rest, and keep the cursor where the user is editing.
+    pub fn wrap_live(&mut self) {
+        let w = self.effective_wrap_width();
+        let text = self.body.lines().join("\n");
+        let wrapped = crate::ai::break_long_lines(&text, w);
+        if wrapped == text {
+            return; // nothing exceeded the width
+        }
+        // Preserve the caret by absolute character offset (break_long_lines only
+        // swaps a space for a newline, so total length and indices are stable).
+        let (row, col) = self.body.cursor();
+        let lines = self.body.lines();
+        let mut off = col;
+        for r in 0..row {
+            off += lines[r].chars().count() + 1;
+        }
+        let mut body = build_body_textarea(&wrapped);
+        // Map the offset back to (row, col) in the wrapped text.
+        let mut rem = off;
+        let mut target_row = 0usize;
+        for (idx, l) in wrapped.split('\n').enumerate() {
+            let lc = l.chars().count();
+            target_row = idx;
+            if rem <= lc {
+                break;
+            }
+            rem -= lc + 1;
+        }
+        use tui_textarea::CursorMove;
+        body.move_cursor(CursorMove::Top);
+        body.move_cursor(CursorMove::Head);
+        for _ in 0..target_row {
+            body.move_cursor(CursorMove::Down);
+        }
+        body.move_cursor(CursorMove::Head);
+        for _ in 0..rem {
+            body.move_cursor(CursorMove::Forward);
+        }
+        self.body = body;
     }
 
     /// Read inputs back into the underlying draft.
@@ -960,7 +1008,7 @@ impl App {
                     ComposeField::Cc => { c.cc.handle_event(&crossterm::event::Event::Key(key)); }
                     ComposeField::Bcc => { c.bcc.handle_event(&crossterm::event::Event::Key(key)); }
                     ComposeField::Subject => { c.subject.handle_event(&crossterm::event::Event::Key(key)); }
-                    ComposeField::Body => { c.body.input(key); }
+                    ComposeField::Body => { c.body.input(key); c.wrap_live(); }
                     ComposeField::From => {
                         if matches!(key.code, crossterm::event::KeyCode::Left) && c.field == ComposeField::From {
                             if c.from_idx > 0 { c.from_idx -= 1; }

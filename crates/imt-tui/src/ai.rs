@@ -311,6 +311,46 @@ pub fn wrap_body(text: &str, width: usize) -> String {
     out.join("\n")
 }
 
+/// Break lines longer than `width` at word boundaries WITHOUT merging existing
+/// line breaks (so signatures, addresses, and lists keep their lines). Only ever
+/// swaps a space for a newline, so total length and character indices are
+/// preserved (lets callers keep the caret position). Quoted `>` lines are left
+/// untouched. Words longer than `width` with no space are left to overflow.
+pub fn break_long_lines(text: &str, width: usize) -> String {
+    if width < 8 {
+        return text.to_string();
+    }
+    let mut chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    let mut col = 0usize;
+    let mut last_space: Option<usize> = None;
+    let mut quote_line = n > 0 && chars[0] == '>';
+    while i < n {
+        let ch = chars[i];
+        if ch == '\n' {
+            col = 0;
+            last_space = None;
+            quote_line = i + 1 < n && chars[i + 1] == '>';
+            i += 1;
+            continue;
+        }
+        if ch == ' ' {
+            last_space = Some(i);
+        }
+        col += 1;
+        if !quote_line && col > width {
+            if let Some(s) = last_space {
+                chars[s] = '\n';
+                col = i - s; // chars now on the new line, up to and including i
+                last_space = None;
+            }
+        }
+        i += 1;
+    }
+    chars.into_iter().collect()
+}
+
 fn wrap_paragraph(p: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();

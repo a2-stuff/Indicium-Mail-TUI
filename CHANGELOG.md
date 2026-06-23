@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-06-23
+
+### Fixed
+- **Compose body now wraps as you type.** Long lines break at word boundaries live while editing (the caret stays where you are), not only on resize/send.
+- **Manual line breaks are preserved.** Wrapping is now break-only and no longer merges your own line breaks, so a multi-line signature stays multi-line when sent (previously it collapsed to one line).
+- **AI reply leaves the caret at the top** of the body instead of jumping to the bottom (no more scrolling up to read the generated reply).
+
 ## [0.1.0] - 2026-06-23
 
 ### Added
