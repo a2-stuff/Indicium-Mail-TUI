@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2026-06-23
+
+### Added
+- **AI reply generation in compose (`Ctrl-G`).** Drafts or refines a reply in the background via a local AI CLI and inserts it at the body cursor. An empty body generates a reply from the email/thread; if you have typed notes, they are expanded and polished into the reply (and the typed notes are replaced, not duplicated). Output is normalized to natural paragraphs (single blank line between paragraphs) instead of robotic per-line spacing.
+  - **Provider selector** in Settings: **Claude**, **Gemini**, or **Codex** (each drives its CLI; a missing CLI reports a clear message).
+  - **Model** field in Settings (empty = the CLI's default). Default is Claude with the `sonnet` alias, which always tracks the latest Sonnet.
+  - Runs off the UI thread; Claude is invoked with `--strict-mcp-config` and a neutral working directory, and the process is stopped once the reply is read so slow exit hooks don't block insertion.
+  - Note: `Ctrl-I` is not usable for this because terminals send it as `Tab`.
+- **Top menu bar** (`F10`) with interactive dropdowns: `Account` (Add Account / Manage Accounts / Refresh), `Settings`, `Info`, `Help`, `Quit`. Navigate with arrows/Tab, Enter to run, Esc to exit. Entries reuse the existing keyboard actions.
+- **Attachment viewer** in a centered floating modal (works over SSH):
+  - **Images** rendered visually as truecolor half-block cells (no graphics protocol required; aspect-preserving).
+  - **PDF** text extracted and shown scrollable; **Word (.docx)** text extracted from the document body.
+  - The attachment list shows each item's type and whether it is viewable.
+- **Draggable + resizable compose window** via mouse: drag the title bar to move, drag the bottom-right corner to resize. The body **hard-wraps** to the window width (per paragraph; quoted `>` lines kept intact) on resize, after AI insert, and on send.
+- **Resizable panes**: drag the vertical dividers between the accounts, inbox, and reading panes to resize them.
+- **Persistent layout**: pane widths and the compose window's size/position are saved to `config.toml` and restored on the next launch.
+- **Mouse support** is now enabled (Shift+drag still selects text in most terminals).
+
+### Changed
+- Footer/status line reorganized into grouped shortcut sections with a dedicated MENU mode hint.
+
 ## [0.0.19] - 2026-05-14
 
 ### Fixed

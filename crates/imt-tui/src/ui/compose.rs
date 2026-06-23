@@ -11,9 +11,23 @@ use crate::keymap::ComposeField;
 use crate::theme;
 use crate::ui::layout::centered;
 
+fn clamp_rect(mut r: Rect, full: Rect) -> Rect {
+    r.width = r.width.clamp(34, full.width.max(34)).min(full.width.max(1));
+    r.height = r.height.clamp(12, full.height.max(12)).min(full.height.saturating_sub(1).max(1));
+    r.x = r.x.min(full.width.saturating_sub(r.width));
+    // Keep below the menu bar (row 0) and above the footer.
+    r.y = r.y.clamp(1, full.height.saturating_sub(r.height + 1).max(1));
+    r
+}
+
 /// Render the compose modal.
 pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
-    let area = centered(full, 80, 80);
+    // Use the stored geometry (after drag/resize) or default to centered.
+    let default = centered(full, 80, 80);
+    let area = clamp_rect(app.compose.as_ref().and_then(|c| c.area).unwrap_or(default), full);
+    if let Some(c) = app.compose.as_mut() {
+        c.area = Some(area);
+    }
     f.render_widget(Clear, area);
 
     // Read app-level flags before the mutable borrow of `app.compose` below.
@@ -47,6 +61,8 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
         Some(c) => c,
         None => return,
     };
+    // Body inner width (minus the body block borders) drives hard-wrapping.
+    compose.wrap_width = chunks[5].width.saturating_sub(2);
 
     let from_label = app
         .accounts
@@ -96,7 +112,11 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
         Span::styled("Tab", theme::accent()),
         Span::styled(" next field  ", theme::muted()),
         Span::styled("Esc", theme::accent()),
-        Span::styled(" cancel", theme::muted()),
+        Span::styled(" cancel  ", theme::muted()),
+        Span::styled("drag title", theme::accent()),
+        Span::styled(" move  ", theme::muted()),
+        Span::styled("drag corner", theme::accent()),
+        Span::styled(" resize", theme::muted()),
     ]))
     .style(theme::status());
     f.render_widget(footer, chunks[7]);

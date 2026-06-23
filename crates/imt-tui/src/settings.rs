@@ -64,6 +64,31 @@ fn default_ai_model() -> String {
     "sonnet".to_string()
 }
 
+fn default_sidebar_frac() -> f32 {
+    0.20
+}
+fn default_list_frac() -> f32 {
+    0.35
+}
+
+/// Persisted window geometry (compose modal position + size).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct WindowGeom {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl WindowGeom {
+    pub fn to_rect(self) -> ratatui::layout::Rect {
+        ratatui::layout::Rect { x: self.x, y: self.y, width: self.width, height: self.height }
+    }
+    pub fn from_rect(r: ratatui::layout::Rect) -> Self {
+        Self { x: r.x, y: r.y, width: r.width, height: r.height }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub auto_refresh_secs: u32,
@@ -80,6 +105,15 @@ pub struct Settings {
     /// For Claude, "sonnet"/"opus"/"haiku" aliases track the latest release.
     #[serde(default = "default_ai_model")]
     pub ai_model: String,
+    /// Persisted sidebar (accounts) pane width fraction.
+    #[serde(default = "default_sidebar_frac")]
+    pub sidebar_frac: f32,
+    /// Persisted message-list (inbox) pane width fraction.
+    #[serde(default = "default_list_frac")]
+    pub list_frac: f32,
+    /// Persisted compose-window geometry (position + size).
+    #[serde(default)]
+    pub compose_geom: Option<WindowGeom>,
 }
 
 impl Default for Settings {
@@ -93,6 +127,9 @@ impl Default for Settings {
             theme: ThemeName::Midnight,
             ai_provider: AiProvider::Claude,
             ai_model: default_ai_model(),
+            sidebar_frac: default_sidebar_frac(),
+            list_frac: default_list_frac(),
+            compose_geom: None,
         }
     }
 }

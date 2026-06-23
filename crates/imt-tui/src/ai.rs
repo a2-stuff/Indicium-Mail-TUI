@@ -35,8 +35,11 @@ pub fn build_prompt(ctx: &ReplyContext) -> String {
     p.push_str(
         "You are drafting a reply to an email on behalf of the user. \
 Output ONLY the reply body text - no subject line, no To/From headers, no quoted \
-original text, no markdown code fences, and no commentary before or after. \
-Use a natural, professional email tone and a sensible greeting and sign-off. \
+original text, no markdown code fences, and no commentary before or after.\n\n\
+Write like a real person, not a template. Use natural paragraphs of one to a few \
+sentences each. Separate paragraphs with a SINGLE blank line. Do NOT put a blank \
+line between every line or after every sentence. Start with a brief greeting and \
+end with a short sign-off. Keep it concise. \
 Do not invent facts that are not supported by the email thread or the user's notes.\n\n",
     );
     if !ctx.my_name.trim().is_empty() || !ctx.my_email.trim().is_empty() {
@@ -174,7 +177,8 @@ async fn run_cli(provider: AiProvider, model: &str, prompt: &str) -> AiResult {
     let _ = child.start_kill();
     let _ = child.wait().await;
 
-    let text = String::from_utf8_lossy(&buf).trim().to_string();
+    let text = String::from_utf8_lossy(&buf).to_string();
+    let text = text.trim().to_string();
     if text.is_empty() {
         let mut errbuf = String::new();
         if let Some(mut e) = stderr.take() {
@@ -192,7 +196,28 @@ async fn run_cli(provider: AiProvider, model: &str, prompt: &str) -> AiResult {
             format!("{bin}: {short}")
         });
     }
-    Ok(strip_fences(&text))
+    Ok(normalize_reply(&strip_fences(&text)))
+}
+
+/// Tidy model output into human spacing: trim trailing whitespace on each line
+/// and collapse runs of 3+ blank lines down to a single blank line between
+/// paragraphs (kills the robotic "every line double-spaced" look).
+pub fn normalize_reply(s: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut blanks = 0;
+    for raw in s.lines() {
+        let line = raw.trim_end();
+        if line.trim().is_empty() {
+            blanks += 1;
+            continue;
+        }
+        if !out.is_empty() && blanks > 0 {
+            out.push(String::new()); // exactly one blank line between paragraphs
+        }
+        blanks = 0;
+        out.push(line.to_string());
+    }
+    out.join("\n").trim().to_string()
 }
 
 /// Strip a wrapping ``` code fence the model may add around the reply.
@@ -243,6 +268,71 @@ pub fn split_notes_and_quote(body: &str) -> (String, String) {
         ),
         None => (body.trim().to_string(), String::new()),
     }
+}
+
+/// Hard-wrap a compose body to `width` columns. Normal paragraphs (runs of
+/// non-blank, non-quoted lines) are merged then re-wrapped at word boundaries;
+/// blank lines and quoted/reply-intro lines (`>` / "On ... wrote:") are kept
+/// verbatim so the quoted thread is never reflowed.
+pub fn wrap_body(text: &str, width: usize) -> String {
+    if width < 8 {
+        return text.to_string();
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let is_special = |l: &str| {
+        let t = l.trim_start();
+        t.starts_with('>') || (t.starts_with("On ") && t.trim_end().ends_with("wrote:"))
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim().is_empty() {
+            out.push(String::new());
+            i += 1;
+            continue;
+        }
+        if is_special(line) {
+            out.push(line.to_string());
+            i += 1;
+            continue;
+        }
+        // Gather a paragraph of consecutive normal lines.
+        let mut para = String::new();
+        while i < lines.len() && !lines[i].trim().is_empty() && !is_special(lines[i]) {
+            if !para.is_empty() {
+                para.push(' ');
+            }
+            para.push_str(lines[i].trim());
+            i += 1;
+        }
+        out.extend(wrap_paragraph(&para, width));
+    }
+    out.join("\n")
+}
+
+fn wrap_paragraph(p: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in p.split_whitespace() {
+        let wlen = word.chars().count();
+        if cur.is_empty() {
+            cur = word.to_string();
+        } else if cur.chars().count() + 1 + wlen <= width {
+            cur.push(' ');
+            cur.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut cur));
+            cur = word.to_string();
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 /// Strip leading `>` quote markers from a quoted block.

@@ -25,7 +25,15 @@ use crate::keymap::Mode;
 
 /// Top-level draw function.
 pub fn draw(f: &mut Frame, app: &mut App) {
-    let chunks = layout::root_layout(f.area());
+    let chunks = layout::root_layout(f.area(), app.sidebar_frac, app.list_frac);
+    // Stash geometry for mouse hit-testing.
+    app.ui_frame = f.area();
+    app.ui_main = ratatui::layout::Rect {
+        x: chunks.sidebar.x,
+        y: chunks.sidebar.y,
+        width: chunks.sidebar.width + chunks.list.width + chunks.reader.width,
+        height: chunks.sidebar.height,
+    };
     menubar::render_menu_bar(f, chunks.menu_bar, app);
     sidebar::render(f, chunks.sidebar, app);
     list::render(f, chunks.list, app);

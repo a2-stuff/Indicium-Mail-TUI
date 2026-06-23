@@ -38,11 +38,13 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 - Compose, reply, reply-all, and forward with quoted bodies and correct threading headers (`In-Reply-To`, `References`)
 - Full-text search across all cached messages via SQLite FTS5
 - Move to folder, delete to Trash, flag, mark read/unread
+- AI reply drafting in compose (`Ctrl-G`) via a local Claude / Gemini / Codex CLI - generates from the thread, or expands the notes you typed
 
 **Reading**
 - Three-pane layout: account/folder sidebar, message list, reader
 - HTML bodies rendered inline via `html2text` - no browser needed
-- Attachment viewer: text, code, and markdown shown inline; binary files identified by MIME type and saved to disk
+- Attachment viewer (centered modal): images rendered inline as truecolor half-blocks (works over SSH, no graphics protocol needed), PDF and Word (.docx) shown as extracted text, text/code/markdown inline; other binaries identified by MIME type and saved to disk
+- Resizable, draggable UI: drag pane dividers to resize the account/inbox/reading panes; drag the compose window to move/resize it - all remembered across restarts
 - Auto mark-read after a configurable dwell time (default 3 seconds)
 - Preview snippets in the message list (optional)
 
@@ -123,6 +125,7 @@ Global flags: `--db <path>`, `--config <path>`, `--log-file <path>`.
 | `s` | toggle flag |
 | `u` | toggle read/unread |
 | `m` | account manager |
+| `F10` | open the menu bar (arrows/Tab to move, Enter to run, Esc to exit) |
 | `d` | delete (moves to Trash) |
 | `E` | empty Trash (only in Trash folder) |
 | `v` | move to folder |
@@ -135,7 +138,25 @@ Global flags: `--db <path>`, `--config <path>`, `--log-file <path>`.
 | `?` | help overlay |
 | `q` | quit |
 
-In compose: `Tab` next field, `Ctrl-A` file picker, `Ctrl-S` send, `Ctrl-D` save draft, `Esc` cancel.
+In compose: `Tab` next field, `Ctrl-G` AI reply, `Ctrl-A` file picker, `Ctrl-S` send, `Ctrl-D` save draft, `Esc` cancel. Drag the title bar to move the window and the bottom-right corner to resize it; the body word-wraps to the window width.
+
+## Mouse
+
+Mouse support is enabled. Drag the dividers between the account, inbox, and reading panes to resize them; drag the compose window's title bar to move it and its bottom-right corner to resize it. Pane sizes and the compose window's position/size persist across restarts. In most terminals, hold `Shift` while dragging to do native text selection / copy-paste.
+
+## AI reply
+
+In the compose window, press `Ctrl-G` to draft a reply with a local AI CLI:
+
+- With an empty body it generates a reply from the email/thread.
+- If you have typed a few notes (e.g. a time and place), it expands and polishes them into a full reply using the thread context - your notes are woven in, not duplicated.
+
+Pick the provider and model in Settings (`,` → AI reply provider / AI model):
+
+- **Claude** (`claude`), **Gemini** (`gemini`), or **Codex** (`codex`). The chosen provider's CLI must be installed and on `PATH`.
+- Model is provider-specific; leave it empty for the CLI's default. The default is Claude with the `sonnet` alias, which always tracks the latest Sonnet.
+
+Generation runs in the background and is inserted at the cursor when ready.
 
 In attachment viewer: `j/k` or arrows scroll, `Enter` or `v` view inline, `s` save to disk, `Esc`/`q` close.
 

@@ -22,6 +22,29 @@ pub struct AccountView {
     pub expanded: bool,
 }
 
+/// How the compose modal is currently being dragged with the mouse.
+#[derive(Debug, Clone, Copy)]
+pub enum ComposeDrag {
+    /// Moving the whole window; offsets are cursor-minus-origin at grab time.
+    Move { off_x: u16, off_y: u16 },
+    /// Resizing from the bottom-right corner.
+    Resize,
+}
+
+/// Build the body editor textarea with the shared cursor styling.
+fn build_body_textarea(text: &str) -> TextArea<'static> {
+    let mut body = TextArea::new(text.lines().map(String::from).collect());
+    body.set_block(
+        ratatui::widgets::Block::default()
+            .borders(ratatui::widgets::Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .title("Body"),
+    );
+    body.set_cursor_line_style(ratatui::style::Style::default());
+    body.set_cursor_style(ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED));
+    body
+}
+
 /// State of the compose modal.
 pub struct ComposeState {
     pub draft: Draft,
@@ -32,6 +55,12 @@ pub struct ComposeState {
     pub subject: Input,
     pub body: TextArea<'static>,
     pub from_idx: usize,
+    /// Explicit modal geometry once moved/resized; None = default centered.
+    pub area: Option<ratatui::layout::Rect>,
+    /// Active mouse drag, if any.
+    pub drag: Option<ComposeDrag>,
+    /// Last rendered body inner width, used for hard-wrapping.
+    pub wrap_width: u16,
 }
 
 impl ComposeState {
@@ -40,17 +69,42 @@ impl ComposeState {
         let cc = Input::new(addr_join(&draft.cc));
         let bcc = Input::new(addr_join(&draft.bcc));
         let subject = Input::new(draft.subject.clone());
-        let mut body = TextArea::new(draft.body_text.lines().map(String::from).collect());
-        body.set_block(
-            ratatui::widgets::Block::default()
-                .borders(ratatui::widgets::Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded)
-                .title("Body"),
-        );
-        body.set_cursor_line_style(ratatui::style::Style::default());
-        body.set_cursor_style(ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED));
+        let body = build_body_textarea(&draft.body_text);
         let from_idx = accounts.iter().position(|a| a.id == draft.account_id).unwrap_or(0);
-        Self { draft, field: ComposeField::To, to, cc, bcc, subject, body, from_idx }
+        Self {
+            draft,
+            field: ComposeField::To,
+            to,
+            cc,
+            bcc,
+            subject,
+            body,
+            from_idx,
+            area: None,
+            drag: None,
+            wrap_width: 0,
+        }
+    }
+
+    /// Replace the body text (rebuilds the editor), placing the cursor at the end.
+    pub fn set_body_text(&mut self, text: &str) {
+        let mut body = build_body_textarea(text);
+        body.move_cursor(tui_textarea::CursorMove::Bottom);
+        body.move_cursor(tui_textarea::CursorMove::End);
+        self.body = body;
+    }
+
+    /// Hard-wrap the body to the current wrap width (if known), preserving quotes.
+    pub fn rewrap_body(&mut self) {
+        let w = self.wrap_width as usize;
+        if w < 8 {
+            return;
+        }
+        let text = self.body.lines().join("\n");
+        let wrapped = crate::ai::wrap_body(&text, w);
+        if wrapped != text {
+            self.set_body_text(&wrapped);
+        }
     }
 
     /// Read inputs back into the underlying draft.
@@ -335,6 +389,16 @@ pub struct App {
     pub ai_generating: bool,
     /// Interactive menu/actions-bar navigation state, when in `Mode::Menu`.
     pub menu_state: Option<crate::menu::MenuState>,
+    /// Width fraction of the sidebar (accounts) pane.
+    pub sidebar_frac: f32,
+    /// Width fraction of the message-list (inbox) pane.
+    pub list_frac: f32,
+    /// Last full frame rect (set during draw, used for mouse hit-testing).
+    pub ui_frame: ratatui::layout::Rect,
+    /// Last three-pane body rect (set during draw).
+    pub ui_main: ratatui::layout::Rect,
+    /// Active pane-divider drag (1 = sidebar|list, 2 = list|reader).
+    pub pane_drag: Option<u8>,
 }
 
 /// Settings modal state.
@@ -606,6 +670,11 @@ impl App {
             ai_rx: None,
             ai_generating: false,
             menu_state: None,
+            sidebar_frac: 0.20,
+            list_frac: 0.35,
+            ui_frame: ratatui::layout::Rect::default(),
+            ui_main: ratatui::layout::Rect::default(),
+            pane_drag: None,
         };
         app.refresh_messages();
         if app.accounts.is_empty() {
@@ -626,7 +695,30 @@ impl App {
         self.html_external = s.html_external;
         self.browser = s.browser.clone();
         crate::theme::apply(s.theme);
+        self.sidebar_frac = s.sidebar_frac.clamp(0.1, 0.6);
+        self.list_frac = s.list_frac.clamp(0.1, 0.7);
         self.settings = s;
+    }
+
+    /// Persist layout preferences (pane fractions + compose geometry) to disk.
+    fn save_layout_prefs(&mut self) {
+        self.settings.sidebar_frac = self.sidebar_frac;
+        self.settings.list_frac = self.list_frac;
+        if let Some(area) = self.compose.as_ref().and_then(|c| c.area) {
+            self.settings.compose_geom = Some(crate::settings::WindowGeom::from_rect(area));
+        }
+        if let Some(cb) = self.on_settings_changed.clone() {
+            cb(&self.settings);
+        }
+    }
+
+    /// Install a compose modal, restoring the saved window geometry if any.
+    fn install_compose(&mut self, mut state: ComposeState) {
+        if let Some(g) = self.settings.compose_geom {
+            state.area = Some(g.to_rect());
+        }
+        self.compose = Some(state);
+        self.mode = Mode::Compose;
     }
 
     /// Open the settings modal.
@@ -685,8 +777,18 @@ impl App {
         match outcome {
             Ok(Ok(reply)) => {
                 if let Some(c) = self.compose.as_mut() {
+                    // Replace the user's typed notes with the generated reply so the
+                    // notes aren't duplicated; keep the quoted thread below it.
+                    let body_text = c.body.lines().join("\n");
+                    let (_notes, quoted) = crate::ai::split_notes_and_quote(&body_text);
+                    let mut new_body = reply.trim().to_string();
+                    if !quoted.trim().is_empty() {
+                        new_body.push_str("\n\n");
+                        new_body.push_str(quoted.trim_start_matches('\n'));
+                    }
                     c.field = ComposeField::Body;
-                    c.body.insert_str(&reply);
+                    c.set_body_text(&new_body);
+                    c.rewrap_body();
                     self.set_status("AI reply inserted");
                 } else {
                     self.set_status("AI reply ready (compose closed)");
@@ -1126,6 +1228,140 @@ impl App {
             KeyAction::AttachmentClose => self.attachment_close(),
             KeyAction::AiGenerateReply => self.ai_generate_reply(),
             KeyAction::OpenMenu => self.open_menu(),
+        }
+    }
+
+    /// Handle a raw mouse event (drag panes in normal mode, move/resize the
+    /// compose window in compose mode).
+    pub fn handle_mouse(&mut self, m: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        if self.mode == Mode::Compose {
+            self.handle_compose_mouse(m);
+            return;
+        }
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.pane_drag = self.divider_hit(m.column, m.row);
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(d) = self.pane_drag {
+                    self.drag_divider(d, m.column);
+                }
+            }
+            MouseEventKind::Up(_) => {
+                if self.pane_drag.take().is_some() {
+                    self.save_layout_prefs();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Which pane divider (1 = sidebar|list, 2 = list|reader) is at this cell.
+    fn divider_hit(&self, col: u16, row: u16) -> Option<u8> {
+        let main = self.ui_main;
+        if main.width == 0 || row < main.y || row >= main.y + main.height {
+            return None;
+        }
+        let (sw, lw, _) = crate::ui::layout::pane_widths(main.width, self.sidebar_frac, self.list_frac);
+        let div1 = main.x + sw;
+        let div2 = main.x + sw + lw;
+        // 1-cell tolerance on either side of the boundary.
+        if col + 1 >= div1 && col <= div1 + 1 {
+            Some(1)
+        } else if col + 1 >= div2 && col <= div2 + 1 {
+            Some(2)
+        } else {
+            None
+        }
+    }
+
+    fn drag_divider(&mut self, divider: u8, col: u16) {
+        let main = self.ui_main;
+        if main.width < 24 {
+            return;
+        }
+        let total = main.width as f32;
+        match divider {
+            1 => {
+                let w = col.saturating_sub(main.x).clamp(8, main.width.saturating_sub(16));
+                self.sidebar_frac = w as f32 / total;
+            }
+            2 => {
+                let (sw, _, _) = crate::ui::layout::pane_widths(main.width, self.sidebar_frac, self.list_frac);
+                let lw = col
+                    .saturating_sub(main.x + sw)
+                    .clamp(8, main.width.saturating_sub(sw + 8));
+                self.list_frac = lw as f32 / total;
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle a mouse event while the compose modal is open: drag the title bar
+    /// to move, drag the bottom-right corner to resize (re-wrapping the body).
+    fn handle_compose_mouse(&mut self, m: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let frame = self.ui_frame;
+        let area = match self.compose.as_ref().and_then(|c| c.area) {
+            Some(a) => a,
+            None => return,
+        };
+        let (col, row) = (m.column, m.row);
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let on_corner = col + 1 >= area.x + area.width && col < area.x + area.width
+                    && row + 1 >= area.y + area.height && row < area.y + area.height;
+                let in_x = col >= area.x && col < area.x + area.width;
+                if on_corner {
+                    if let Some(c) = self.compose.as_mut() {
+                        c.drag = Some(ComposeDrag::Resize);
+                    }
+                } else if row == area.y && in_x {
+                    if let Some(c) = self.compose.as_mut() {
+                        c.drag = Some(ComposeDrag::Move { off_x: col - area.x, off_y: row - area.y });
+                    }
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let drag = self.compose.as_ref().and_then(|c| c.drag);
+                match drag {
+                    Some(ComposeDrag::Move { off_x, off_y }) => {
+                        let max_x = frame.width.saturating_sub(area.width);
+                        let max_y = frame.height.saturating_sub(area.height + 1);
+                        let nx = col.saturating_sub(off_x).min(max_x);
+                        let ny = row.saturating_sub(off_y).max(1).min(max_y.max(1));
+                        if let Some(c) = self.compose.as_mut() {
+                            c.area = Some(ratatui::layout::Rect { x: nx, y: ny, ..area });
+                        }
+                    }
+                    Some(ComposeDrag::Resize) => {
+                        let new_w = (col.saturating_sub(area.x) + 1)
+                            .clamp(34, frame.width.saturating_sub(area.x).max(34));
+                        let new_h = (row.saturating_sub(area.y) + 1)
+                            .clamp(12, frame.height.saturating_sub(area.y).max(12));
+                        if let Some(c) = self.compose.as_mut() {
+                            c.area = Some(ratatui::layout::Rect { width: new_w, height: new_h, ..area });
+                            c.rewrap_body();
+                        }
+                    }
+                    None => {}
+                }
+            }
+            MouseEventKind::Up(_) => {
+                let was_dragging = if let Some(c) = self.compose.as_mut() {
+                    if matches!(c.drag, Some(ComposeDrag::Resize)) {
+                        c.rewrap_body();
+                    }
+                    c.drag.take().is_some()
+                } else {
+                    false
+                };
+                if was_dragging {
+                    self.save_layout_prefs();
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2040,8 +2276,8 @@ impl App {
         };
         let draft = empty_draft(acc.id, acc.address.clone());
         let accounts: Vec<Account> = self.accounts.iter().map(|a| a.account.clone()).collect();
-        self.compose = Some(ComposeState::from_draft(draft, &accounts));
-        self.mode = Mode::Compose;
+        let state = ComposeState::from_draft(draft, &accounts);
+        self.install_compose(state);
     }
 
     fn start_reply(&mut self, all: bool) {
@@ -2060,8 +2296,8 @@ impl App {
         msg_with_body.body = self.current_body.clone().or(msg.body.clone());
         let draft = build_reply(&msg_with_body, all, &acc.address);
         let accounts: Vec<Account> = self.accounts.iter().map(|a| a.account.clone()).collect();
-        self.compose = Some(ComposeState::from_draft(draft, &accounts));
-        self.mode = Mode::Compose;
+        let state = ComposeState::from_draft(draft, &accounts);
+        self.install_compose(state);
     }
 
     fn start_forward(&mut self) {
@@ -2080,8 +2316,8 @@ impl App {
         msg_with_body.body = self.current_body.clone().or(msg.body.clone());
         let draft = build_forward(&msg_with_body, &acc.address);
         let accounts: Vec<Account> = self.accounts.iter().map(|a| a.account.clone()).collect();
-        self.compose = Some(ComposeState::from_draft(draft, &accounts));
-        self.mode = Mode::Compose;
+        let state = ComposeState::from_draft(draft, &accounts);
+        self.install_compose(state);
     }
 
     fn send_compose(&mut self) {
@@ -2090,6 +2326,7 @@ impl App {
             Some(c) => c,
             None => return,
         };
+        taken.rewrap_body();
         taken.sync_to_draft(&accounts);
         match self.data.send(&taken.draft) {
             Ok(()) => {

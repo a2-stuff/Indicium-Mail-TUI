@@ -4,7 +4,9 @@ use std::io::{stdout, Stdout};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{Event, EventStream, KeyEventKind};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -22,9 +24,9 @@ struct TerminalGuard;
 impl TerminalGuard {
     fn new() -> anyhow::Result<Self> {
         enable_raw_mode()?;
-        // Mouse capture intentionally NOT enabled - it would block native
-        // terminal text selection / copy-paste, and the app doesn't use mouse.
-        execute!(stdout(), EnterAlternateScreen)?;
+        // Mouse capture enables dragging the compose window and resizing panes.
+        // Most terminals still allow native text selection via Shift+drag.
+        execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
         Ok(Self)
     }
 }
@@ -32,7 +34,7 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(stdout(), LeaveAlternateScreen);
+        let _ = execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen);
     }
 }
 
@@ -69,6 +71,9 @@ pub async fn run_with<D: DataSource + 'static>(
                         if key.kind != KeyEventKind::Release {
                             app.handle_key(key);
                         }
+                    }
+                    Some(Ok(Event::Mouse(me))) => {
+                        app.handle_mouse(me);
                     }
                     Some(Ok(_)) => {}
                     Some(Err(e)) => return Err(e.into()),
