@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-06-23
+
+### Changed
+- **AI reply with extra instruction/context is now `Ctrl-T`** (was `Ctrl-Shift-G`). `Ctrl-T` is distinguishable in every terminal, so the "Instruction or Context" dialog works without needing the enhanced keyboard protocol. `Ctrl-Shift-G` still opens the same dialog on terminals that support the protocol.
+
 ## [0.3.0] - 2026-06-23
 
 ### Added

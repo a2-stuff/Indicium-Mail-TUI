@@ -109,7 +109,7 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
         Span::styled(" save draft  ", theme::muted()),
         Span::styled("Ctrl-G", theme::accent()),
         Span::styled(" AI reply  ", theme::muted()),
-        Span::styled("Ctrl-Shift-G", theme::accent()),
+        Span::styled("Ctrl-T", theme::accent()),
         Span::styled(" +context  ", theme::muted()),
         Span::styled("Tab", theme::accent()),
         Span::styled(" next field  ", theme::muted()),
@@ -128,10 +128,10 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
     }
 }
 
-/// Small centered "Instruction or Context" dialog for an AI reply (Ctrl-Shift-G).
+/// Small centered "Instruction or Context" dialog for an AI reply (Ctrl-T).
 fn render_instruction_dialog(f: &mut Frame, full: Rect, value: &str) {
     let w = full.width.saturating_sub(4).min(64).max(20);
-    let h = 5u16.min(full.height.max(5));
+    let h = 5u16.min(full.height);
     let x = full.x + full.width.saturating_sub(w) / 2;
     let y = full.y + full.height.saturating_sub(h) / 2;
     let area = Rect { x, y, width: w, height: h };

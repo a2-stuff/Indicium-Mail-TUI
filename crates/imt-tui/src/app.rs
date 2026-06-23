@@ -61,7 +61,7 @@ pub struct ComposeState {
     pub drag: Option<ComposeDrag>,
     /// Last rendered body inner width, used for hard-wrapping.
     pub wrap_width: u16,
-    /// When Some, the "Instruction or Context" dialog is open (Ctrl-Shift-G).
+    /// When Some, the "Instruction or Context" dialog is open (Ctrl-T).
     pub instruction: Option<Input>,
 }
 

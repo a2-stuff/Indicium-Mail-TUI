@@ -361,9 +361,12 @@ fn map_compose(key: KeyEvent) -> Option<KeyAction> {
         KeyCode::Char('s') if ctrl => Some(KeyAction::Send),
         KeyCode::Char('d') if ctrl => Some(KeyAction::SaveDraft),
         KeyCode::Char('a') if ctrl => Some(KeyAction::AddAttachment),
-        // Ctrl-Shift-G: AI reply WITH an extra instruction/context prompt.
-        // Only distinguishable from Ctrl-G when the terminal supports the
-        // enhanced keyboard protocol. Match 'g' or 'G' to be safe.
+        // Ctrl-T: AI reply WITH an extra instruction/context prompt. Works in
+        // every terminal (unlike Ctrl-Shift-G, which needs the enhanced
+        // keyboard protocol to be told apart from Ctrl-G).
+        KeyCode::Char('t') | KeyCode::Char('T') if ctrl => Some(KeyAction::AiReplyWithInstructions),
+        // Ctrl-Shift-G also opens the instruction dialog where the terminal can
+        // distinguish it; harmlessly falls through to Ctrl-G otherwise.
         KeyCode::Char('g') | KeyCode::Char('G') if ctrl && shift => Some(KeyAction::AiReplyWithInstructions),
         // NOTE: Ctrl-I cannot be used - terminals send it as Tab (0x09),
         // indistinguishable from the focus-next key. Ctrl-G ("Generate").
