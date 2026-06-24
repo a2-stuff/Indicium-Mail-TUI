@@ -151,6 +151,31 @@ pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
     field_rects.push((chunks[idx], OnboardingField::KeepOnServer));
     idx += 1;
 
+    // Place a hardware cursor in the focused text field so it is obvious the
+    // field is active and accepts typing. Cyclers/checkbox have no text cursor.
+    let focus_len: Option<usize> = match cur {
+        OnboardingField::DisplayName => Some(onboarding.display_name.value().chars().count()),
+        OnboardingField::Email => Some(onboarding.email.value().chars().count()),
+        OnboardingField::ImapHost => Some(onboarding.imap_host.value().chars().count()),
+        OnboardingField::ImapPort => Some(onboarding.imap_port.value().chars().count()),
+        OnboardingField::SmtpHost => Some(onboarding.smtp_host.value().chars().count()),
+        OnboardingField::SmtpPort => Some(onboarding.smtp_port.value().chars().count()),
+        OnboardingField::Username => Some(onboarding.username.value().chars().count()),
+        OnboardingField::Password => Some(onboarding.password.value().chars().count()),
+        OnboardingField::ClientId => Some(onboarding.client_id.value().chars().count()),
+        OnboardingField::ClientSecret => Some(onboarding.client_secret.value().chars().count()),
+        OnboardingField::AuthCode => Some(onboarding.auth_code.value().chars().count()),
+        _ => None,
+    };
+    if let Some(len) = focus_len {
+        if let Some((rect, _)) = field_rects.iter().find(|(_, fld)| *fld == cur) {
+            // Content sits one cell inside the rounded border.
+            let max_x = rect.x + rect.width.saturating_sub(2);
+            let cx = (rect.x + 1 + len as u16).min(max_x);
+            f.set_cursor_position((cx, rect.y + 1));
+        }
+    }
+
     app.ui_onboarding_fields = field_rects;
 
     let footer_idx = idx + 1; // skip Min(0)
