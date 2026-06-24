@@ -5,6 +5,7 @@ pub mod account_task;
 pub mod backend;
 pub mod engine;
 pub mod error;
+pub mod local;
 pub mod password;
 pub mod snippet;
 

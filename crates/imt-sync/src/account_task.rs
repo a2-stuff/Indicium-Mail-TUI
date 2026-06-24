@@ -135,6 +135,14 @@ async fn run_once(ctx: &AccountTaskCtx) -> std::result::Result<(), SyncErrorReas
     if let Err(e) = ensure_fresh_tokens(&ctx.account).await {
         return Err(SyncErrorReason::Other(format!("token refresh: {e}")));
     }
+    // POP3 has no server folders; make sure the account's local Sent/Trash/Drafts
+    // exist so sent mail has a home and deletes have somewhere to go. Runs before
+    // connect so the folders show up even if the server is unreachable.
+    if let Err(e) = crate::local::ensure_pop3_local_folders(ctx.db.as_ref(), &ctx.account).await {
+        warn!(target: "imt-sync::account_task", "ensure local folders: {}", e);
+    } else {
+        let _ = ctx.tx.send(SyncEvent::FolderListUpdated { account_id: ctx.account.id });
+    }
     let provider = imap_provider_for(&ctx.account);
     let mut backend = make_backend(&ctx.account, provider);
     backend

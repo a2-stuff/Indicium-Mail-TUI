@@ -7,9 +7,10 @@ use tokio::sync::{mpsc, Mutex, Notify};
 use tokio::task::JoinHandle;
 use tracing::warn;
 
+use chrono::Utc;
 use imt_core::{
-    Account, AccountId, Address, Draft, Flag, FolderId, FolderRole, Message, MessageBody,
-    MessageId, SyncEvent, Uid,
+    Account, AccountId, Address, Attachment, Draft, Flag, Folder, FolderId, FolderRole,
+    IncomingProtocol, Message, MessageBody, MessageHeaders, MessageId, SyncEvent, Uid,
 };
 use imt_net::smtp::{BuildDraft, DraftAttachmentRef};
 use imt_net::{build_rfc822, SmtpSender};
@@ -300,8 +301,15 @@ impl SyncEngine {
         smtp.send(&draft.from, &draft.to, &draft.cc, &draft.bcc, &raw)
             .await?;
 
-        let sent_folder = find_sent_folder(&self.db, acc.id).await;
-        if let Some(sent) = sent_folder {
+        if acc.imap.protocol == IncomingProtocol::Pop3 {
+            // POP3 has no server APPEND - file a local copy into the Sent folder.
+            let _ = crate::local::ensure_pop3_local_folders(self.db.as_ref(), &acc).await;
+            if let Some(sent) = find_sent_folder(&self.db, acc.id).await {
+                if let Err(e) = self.store_local_sent(&acc, &sent, draft, &raw).await {
+                    warn!(target: "imt-sync::engine", "store local Sent copy failed: {}", e);
+                }
+            }
+        } else if let Some(sent) = find_sent_folder(&self.db, acc.id).await {
             let provider = imap_provider_for(&acc);
             let mut backend = crate::backend::make_backend(&acc, provider);
             match backend.connect().await {
@@ -333,6 +341,12 @@ impl SyncEngine {
         let dst_folder = folder_repo.get(dest_folder_id).await?;
         let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
         let was_unread = !msg.flags.contains(&Flag::Seen);
+
+        // POP3 has no server-side folders, so a move (incl. delete-to-Trash) is a
+        // purely local operation between local folders.
+        if acc.imap.protocol == IncomingProtocol::Pop3 {
+            return self.move_local(&acc, msg, src_folder, dst_folder).await;
+        }
 
         let provider = imap_provider_for(&acc);
         let mut backend = crate::backend::make_backend(&acc, provider);
@@ -377,6 +391,136 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// File a local copy of a just-sent message into a POP3 account's local Sent
+    /// folder (POP3 has no server APPEND). Persists the body so it is readable.
+    async fn store_local_sent(
+        &self,
+        acc: &Account,
+        sent: &Folder,
+        draft: &Draft,
+        raw: &[u8],
+    ) -> Result<()> {
+        let folder_repo = FolderRepo::new(self.db.pool());
+        let msg_repo = MessageRepo::new(self.db.pool());
+        let folder = folder_repo.get(sent.id).await.unwrap_or_else(|_| sent.clone());
+        let uid = folder.uid_next.max(1);
+
+        let attachments: Vec<Attachment> = draft
+            .attachments
+            .iter()
+            .enumerate()
+            .map(|(i, a)| Attachment {
+                filename: a.filename.clone(),
+                mime_type: a.mime_type.clone(),
+                size: a.size,
+                part_id: i.to_string(),
+                content_id: None,
+                inline: false,
+                temp_path: Some(a.path.clone()),
+            })
+            .collect();
+        let has_attachments = !attachments.is_empty();
+        let body = MessageBody {
+            text_plain: Some(draft.body_text.clone()),
+            text_html: None,
+            attachments,
+        };
+        let headers = MessageHeaders {
+            rfc_message_id: None,
+            in_reply_to: None,
+            references: Vec::new(),
+            from: vec![draft.from.clone()],
+            to: draft.to.clone(),
+            cc: draft.cc.clone(),
+            bcc: draft.bcc.clone(),
+            reply_to: Vec::new(),
+            subject: draft.subject.clone(),
+            date: Utc::now(),
+        };
+        let msg = Message {
+            id: MessageId::new(),
+            account_id: acc.id,
+            folder_id: folder.id,
+            thread_id: None,
+            uid: Uid(uid),
+            headers,
+            flags: vec![Flag::Seen],
+            size: raw.len() as u64,
+            body: Some(body),
+            has_attachments,
+            snippet: crate::snippet::make_snippet(&draft.body_text, 256),
+            internal_date: Utc::now(),
+        };
+        let mid = msg.id;
+        // upsert_envelope persists the body fields too (has_body=1) since body is Some.
+        msg_repo.upsert_envelope(&msg).await?;
+        let updated = Folder {
+            uid_next: uid + 1,
+            message_count: folder.message_count.saturating_add(1),
+            ..folder.clone()
+        };
+        folder_repo.upsert(&updated).await?;
+        let _ = self.tx.send(SyncEvent::MessageAdded { folder_id: folder.id, message_id: mid });
+        let _ = self.tx.send(SyncEvent::FolderCountsChanged {
+            folder_id: folder.id,
+            total: updated.message_count,
+            unread: updated.unread_count,
+        });
+        Ok(())
+    }
+
+    /// Move a message between a POP3 account's local folders (e.g. Inbox ->
+    /// Trash on delete). No server traffic: the row is copied into the
+    /// destination with a fresh local uid and removed from the source. If the
+    /// body has not been downloaded yet it is fetched first so the moved copy is
+    /// self-contained (the maildrop sequence number stops being valid once the
+    /// row leaves the Inbox).
+    async fn move_local(
+        &self,
+        acc: &Account,
+        msg: Message,
+        src_folder: Folder,
+        dst_folder: Folder,
+    ) -> Result<()> {
+        let msg_repo = MessageRepo::new(self.db.pool());
+        let folder_repo = FolderRepo::new(self.db.pool());
+
+        let mut moved = msg.clone();
+        if moved.body.is_none() {
+            let provider = imap_provider_for(acc);
+            let mut backend = crate::backend::make_backend(acc, provider);
+            if backend.connect().await.is_ok() {
+                if let Ok(body) = backend.fetch_body(&src_folder.path, moved.uid.0).await {
+                    moved.body = Some(body);
+                }
+                let _ = backend.disconnect().await;
+            }
+        }
+
+        let dst = folder_repo.get(dst_folder.id).await.unwrap_or_else(|_| dst_folder.clone());
+        let new_uid = dst.uid_next.max(1);
+        moved.id = MessageId::new();
+        moved.folder_id = dst.id;
+        moved.uid = Uid(new_uid);
+        msg_repo.upsert_envelope(&moved).await?;
+        msg_repo.delete_by_uid(src_folder.id, msg.uid).await?;
+
+        let dst_updated = Folder { uid_next: new_uid + 1, ..dst.clone() };
+        folder_repo.upsert(&dst_updated).await?;
+
+        let _ = self.tx.send(SyncEvent::MessageRemoved { folder_id: src_folder.id, uid: msg.uid });
+        let _ = self.tx.send(SyncEvent::MessageAdded { folder_id: dst.id, message_id: moved.id });
+        if let Ok((t, u)) = count_folder(&msg_repo, src_folder.id).await {
+            let _ = folder_repo.update_counts(src_folder.id, t, u).await;
+            let _ = self.tx.send(SyncEvent::FolderCountsChanged { folder_id: src_folder.id, total: t, unread: u });
+        }
+        if let Ok((t, u)) = count_folder(&msg_repo, dst.id).await {
+            let _ = folder_repo.update_counts(dst.id, t, u).await;
+            let _ = self.tx.send(SyncEvent::FolderCountsChanged { folder_id: dst.id, total: t, unread: u });
+        }
+        Ok(())
+    }
+
     /// Hard-delete every message in `folder` by issuing IMAP `STORE \Deleted`
     /// for all UIDs and EXPUNGE-ing. Clears local state too. Intended for the
     /// Trash folder; the caller is responsible for that policy.
@@ -386,11 +530,15 @@ impl SyncEngine {
         let folder = folder_repo.get(folder_id).await?;
         let acc = AccountRepo::new(self.db.pool()).get(folder.account_id).await?;
 
-        let provider = imap_provider_for(&acc);
-        let mut backend = crate::backend::make_backend(&acc, provider);
-        backend.connect().await?;
-        backend.expunge_folder(&folder.path).await?;
-        let _ = backend.disconnect().await;
+        // POP3 Trash is a local-only folder; never issue server DELE/EXPUNGE
+        // (that would wipe the maildrop). Just clear the local rows.
+        if acc.imap.protocol != IncomingProtocol::Pop3 {
+            let provider = imap_provider_for(&acc);
+            let mut backend = crate::backend::make_backend(&acc, provider);
+            backend.connect().await?;
+            backend.expunge_folder(&folder.path).await?;
+            let _ = backend.disconnect().await;
+        }
 
         msg_repo.delete_by_folder(folder_id).await?;
         let _ = folder_repo.update_counts(folder_id, 0, 0).await;

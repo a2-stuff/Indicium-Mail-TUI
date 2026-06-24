@@ -34,7 +34,7 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 
 **Mail**
 - Real RFC 2177 IDLE push - new mail appears instantly without polling
-- Choose your receiving protocol per account: IMAP (folders, flags, IDLE push) or POP3 (single inbox, download-oriented)
+- Choose your receiving protocol per account: IMAP (folders, flags, IDLE push) or POP3 (single inbox, download-oriented). POP3 accounts get local Sent / Drafts / Trash folders since the protocol has none of its own - sent mail is filed locally and deletes move to a local Trash
 - IMAP, POP3, and SMTP each support implicit TLS, STARTTLS, and plain
 - Compose, reply, reply-all, and forward with quoted bodies and correct threading headers (`In-Reply-To`, `References`)
 - Full-text search across all cached messages via SQLite FTS5
