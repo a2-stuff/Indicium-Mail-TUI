@@ -35,19 +35,22 @@ Pure data types: `Account`, `Folder`, `Message`, `Thread`, `Draft`, `Address`, `
 
 `OAuthProvider` variants: `Google`, `Microsoft { tenant }`, `Yahoo`, `Custom { auth_url, token_url, scope }`.
 
+- `Account` / `NewAccountForm` carry `keep_on_server: bool` (default `true`, `#[serde(default)]`). When `false`, a message is removed from the IMAP server once its body has been downloaded locally (POP3-style "do not leave a copy"); the local copy is kept.
+- `Message` carries `has_attachments: bool` (`#[serde(default)]`), set at envelope-sync from the server `BODYSTRUCTURE` (or a Content-Type header heuristic) so the list can show a 📎 marker without downloading the body, and corrected to the exact value once the full body is fetched.
+
 ### `imt-store`
 SQLite persistence layer (sqlx + migrations).
 
 - WAL journal mode, foreign keys on, 5s busy timeout
-- Tables: `accounts`, `folders`, `messages`, `threads`, `drafts` + FTS5 `messages_fts`
+- Tables: `accounts`, `folders`, `messages`, `threads`, `drafts`, `folder_attachment_scan` + FTS5 `messages_fts`
 - Repos: `AccountRepo`, `FolderRepo`, `MessageRepo`, `DraftRepo`, `SearchRepo`
-- Indexes: `idx_messages_folder_date` on `(folder_id, internal_date DESC)` (0001), FTS5 triggers (0002), `idx_messages_account` on `account_id` (0003)
+- Migrations (applied in lexical order, recorded idempotently): `idx_messages_folder_date` on `(folder_id, internal_date DESC)` + FTS5 triggers (0001-0003), `messages.has_attachments` column (0004), `folder_attachment_scan` table tracking the one-time per-folder attachment rescan (0005), `accounts.keep_on_server` column defaulting to 1 (0006)
 - `secrets` module: file storage at `~/.local/share/indicium-mail-tui/secrets/<id>:<kind>` (0600). Set `IMT_USE_KEYRING=1` to route through the OS keyring instead. Keys stored per account: `imap_password`, `smtp_password`, `oauth_access_token`, `oauth_access_expiry`, `oauth_refresh_token`, `oauth_client_secret`.
 
 ### `imt-net`
 Protocol adapters behind the `MailBackend` async trait.
 
-- `ImapBackend`: connect (implicit TLS / STARTTLS / plain), folder list, fetch envelopes, fetch body, append, set flags, RFC 2177 IDLE push (auto-renewed every 28 minutes; falls back to 30s STATUS poll on servers without IDLE). XOAUTH2 SASL wired in for OAuth2 accounts. Logs a `WARN` when connecting in `Tls::None` plaintext mode.
+- `ImapBackend`: connect (implicit TLS / STARTTLS / plain), folder list, fetch envelopes (incl. `BODYSTRUCTURE` for attachment detection without downloading parts), fetch body, append, set flags, `move_uid`, `expunge_folder`, `delete_uid` (single-message removal: `UID STORE \Deleted` then a targeted `UID EXPUNGE` where the server advertises UIDPLUS, otherwise a folder `EXPUNGE`), RFC 2177 IDLE push (auto-renewed every 28 minutes; falls back to 30s STATUS poll on servers without IDLE). At connect time it probes capabilities once for `IDLE` / `MOVE` / `UIDPLUS`. XOAUTH2 SASL wired in for OAuth2 accounts. Logs a `WARN` when connecting in `Tls::None` plaintext mode.
 - `SmtpSender`: lettre-based SMTP with the same TLS modes. XOAUTH2 SASL for OAuth2 accounts. Logs a `WARN` when sending over `Tls::None`.
 - `oauth`: Authorization Code + PKCE (RFC 7636) + Refresh flow with CSRF state.
   - Providers: Google (`accounts.google.com`), Microsoft 365 (`login.microsoftonline.com/<tenant>`), Yahoo (`api.login.yahoo.com`), Custom (arbitrary endpoints).
@@ -63,14 +66,15 @@ Event-driven sync engine.
   1. calls `ensure_fresh_tokens()` to refresh OAuth2 access tokens if within 60 seconds of expiry
   2. connects (emits `AccountConnecting`/`AccountConnected`)
   3. lists folders, persists, emits `FolderListUpdated`
-  4. for each folder: select, fetch envelopes for new UIDs, persist, emit `MessageAdded`
+  4. for each folder: select, fetch envelopes for new UIDs, persist, emit `MessageAdded`. The first sync of each folder forces a full UID rescan (regardless of `last_uid_next`) so messages that pre-date attachment detection get `has_attachments` set from `BODYSTRUCTURE`; the folder is then marked scanned in `folder_attachment_scan`. Neither sync path deletes local rows for messages that have vanished from the server.
   5. enters IDLE on the inbox; on `EXISTS`/`EXPUNGE`/`FETCH` re-syncs and re-enters
 - Exponential backoff (5s -> 5min) on connection errors
 - `password.rs`: `imap_provider_for(&account)` and `smtp_provider_for(&account)` return auth-method-aware `PasswordProvider` closures (load `imap_password` for password accounts, `oauth_access_token` for OAuth2 accounts); `ensure_fresh_tokens()` handles silent token refresh - missing or malformed `oauth_access_expiry` is treated as expired (forces refresh); a missing refresh token returns an explicit `"please re-authenticate the account"` error.
 - `move_message`: on server move success but DB delete failure, the error propagates to the caller and a `SyncFinished` event is emitted to schedule reconciliation. After a successful move, recomputes total/unread counts for both the source and destination folder from the local message table, persists them via `FolderRepo::update_counts`, and emits `FolderCountsChanged` for each so the sidebar reflects the move in every folder immediately (not only the one currently loaded).
 - `empty_trash(folder_id)`: marks every UID in the folder `\Deleted` via the new `MailBackend::expunge_folder` method (IMAP `UID STORE 1:* +FLAGS \Deleted` + `EXPUNGE`), then calls `MessageRepo::delete_by_folder` and emits `FolderCountsChanged { total: 0, unread: 0 }`. The TUI binds this to `Shift+E` and refuses to run unless the current folder's role is `Trash`.
 - `send`: relies on the next folder sync to fetch the canonical Sent envelope from IMAP rather than inserting a `UID(0)` stub locally - eliminates the duplicate-row bug after a transient DB error.
-- Public methods: `add_account(account, password, oauth_exchange)`, `remove_account`, `sync_folder`, `fetch_body`, `send`, `move_message`, `empty_trash`, `shutdown`
+- `fetch_body`: downloads and persists the body, then - if the account has `keep_on_server == false` - calls `MailBackend::delete_uid` to remove the message from the server. The local copy is kept (the sync paths never purge vanished messages, so it still shows in the client); a deletion failure is logged and leaves the copy on the server.
+- Public methods: `add_account(account, password, oauth_exchange)`, `update_account`, `remove_account`, `sync_folder`, `fetch_body`, `send`, `move_message`, `empty_trash`, `shutdown`
 
 `OAuthExchange` (in `engine.rs`): `{ client_id, client_secret, code, verifier, redirect_uri }` - passed through from the TUI onboarding form when saving an OAuth2 account; the engine performs the async HTTP code exchange and stores resulting tokens in secrets.
 
@@ -79,15 +83,21 @@ Ratatui application.
 
 - `App` is the state machine; `run()` owns the terminal lifecycle
 - `DataSource` trait is sync (zero-cost reads from a snapshot)
-- `Mode` enum: `Normal`, `Compose`, `Help`, `Search`, `Onboarding`, `Settings`, `Accounts`, `Move`, `Info`, `FilePicker`, `AttachmentViewer`, `HtmlViewer`
-- Components in `ui/`: `sidebar`, `list`, `reader`, `compose`, `onboarding`, `help`, `search`, `status`, `layout`, `attachment_viewer`
+- `Mode` enum: `Normal`, `Compose`, `Help`, `Search`, `Onboarding`, `Settings`, `Accounts`, `Move`, `Info`, `FilePicker`, `AttachmentViewer`, `HtmlViewer`, `Thread`, `Menu`
+- Components in `ui/`: `sidebar`, `list`, `reader`, `compose`, `onboarding`, `help`, `search`, `status`, `layout`, `attachment_viewer`, `menubar`, `thread`, `file_picker`, `move_modal`, `accounts`, `info`, `settings`, `toast`
 - `App::tick()` runs every 250ms; pulls fresh state from the data source so background sync events become visible automatically
+
+**Mouse**: the menu bar and all three panes are clickable. `App::handle_mouse` routes by the pane/menu rects stashed during `ui::draw` (`ui_menu` / `ui_sidebar` / `ui_list` / `ui_reader`). Clicking a top menu opens its dropdown or runs it; clicking a sidebar account toggles its expansion and a folder switches to it; clicking a message opens it in the reader; the scroll wheel scrolls the pane under the cursor. Pane dividers and the compose window remain drag-to-resize/move, and the layout persists.
+
+**AI reply** (`ai.rs`): `Ctrl-G` in compose drafts/refines a reply via a local AI CLI (Claude/Gemini/Codex, chosen in Settings) in the background; `Ctrl-T` opens an instruction/context dialog first. The CLI runs in an isolated temp working directory with an `attachments/` subdir; any files the model writes there are auto-attached to the draft. For a brand-new compose (not a reply/forward) the background-selected message is ignored.
+
+**Thread view** (`thread.rs`, `Mode::Thread`, key `t`): reconstructs the conversation on demand from RFC 822 references (`Message-ID` / `In-Reply-To` / `References`) across all loaded folders - grouping is by references only, never by subject. Messages with attachments are marked and openable in the attachment viewer.
 
 **HTML viewer**: `App::open_html_viewer()` converts the selected HTML part to plain text using `html2text::from_read()` with a 120-character line width and stores it in `app.html_viewer: Option<(String, u16)>`. The `HtmlViewer` mode renders a scrollable modal; scroll offset is the `u16`.
 
 **Attachment viewer**: `is_viewable(mime, filename)` returns true for text/*, common code and data file extensions (`.md`, `.txt`, `.rs`, `.py`, `.js`, `.ts`, `.json`, `.toml`, `.yaml`, `.csv`, `.log`, etc.) and false for binary MIME types regardless of filename. Text attachments are shown inline; binary files display their MIME type, size, and a save-to-disk prompt.
 
-**Onboarding modal**: dynamically adapts its field layout based on the `use_oauth2` toggle on `OnboardingState`. OAuth2 path: Display name, Email, IMAP host/port/TLS, SMTP host/port/TLS, Username, Auth type, Client ID, Client Secret, auth URL display, Auth Code. Password path: same minus the four OAuth2-specific fields. Tabbing to Auth Code triggers `ensure_oauth_url_generated()` which delegates to `imt_net::OAuthFlow::authorize_url(redirect_uri, login_hint)` - returning a (URL, PKCE verifier, CSRF state) triple - then spawns `xdg-open` to open the URL. The verifier and state are stored on `OnboardingState` and threaded through to `NewAccountForm` for code exchange.
+**Onboarding modal**: dynamically adapts its field layout based on the `use_oauth2` toggle on `OnboardingState`. OAuth2 path: Display name, Email, IMAP host/port/TLS, SMTP host/port/TLS, Username, Auth type, Client ID, Client Secret, auth URL display, Auth Code. Password path: same minus the four OAuth2-specific fields. Both paths end with a **Keep copy on server** checkbox (`OnboardingField::KeepOnServer`, toggled with `Space` or `←/→`, default on) that maps to `Account::keep_on_server`. Tabbing to Auth Code triggers `ensure_oauth_url_generated()` which delegates to `imt_net::OAuthFlow::authorize_url(redirect_uri, login_hint)` - returning a (URL, PKCE verifier, CSRF state) triple - then spawns `xdg-open` to open the URL. The verifier and state are stored on `OnboardingState` and threaded through to `NewAccountForm` for code exchange. The same modal is reused for editing an existing account (prefilled from the stored `Account`).
 
 ### `imt`
 Binary, integration layer.
@@ -161,7 +171,7 @@ Logs are written to `~/.local/share/indicium-mail-tui/imt.log` (rotating is the 
 ## Known limitations
 
 - `APPENDUID` is not extracted from IMAP responses (async-imap 0.10 limitation). After a `send` we wait for the next folder sync to discover the canonical UID rather than inserting a stub.
-- Threading is stubbed (`thread_id: None`); messages are listed flat
+- `thread_id` is not populated by the sync engine; the message list is flat. Conversations are reconstructed on demand for the thread view (`t`) from RFC 822 references only.
 - Per-folder index in the sidebar updates on tick; very large mailboxes (>10000 messages) may want pagination beyond the current 500-row cap
 - `xdg-open` is used to launch the OAuth2 authorization URL; on macOS use `open` (set via `$BROWSER` or a shell alias)
 - IMAP connections are opened per-operation for `move`, `set_flag`, `fetch_body`, `sync_folder`. A connection-reuse refactor would reduce per-op TLS handshake overhead but is not yet wired in.

@@ -38,12 +38,12 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 - Compose, reply, reply-all, and forward with quoted bodies and correct threading headers (`In-Reply-To`, `References`)
 - Full-text search across all cached messages via SQLite FTS5
 - Move to folder, delete to Trash, flag, mark read/unread
-- AI reply drafting in compose (`Ctrl-G`) via a local Claude / Gemini / Codex CLI - generates from the thread, or expands the notes you typed
+- AI reply drafting in compose (`Ctrl-G`) via a local Claude / Gemini / Codex CLI - generates from the thread, or expands the notes you typed; `Ctrl-T` adds an instruction/context prompt first. Files the model generates (txt/csv/xlsx/pdf/images/zip, ...) are auto-attached to the draft
 
 **Reading**
 - Three-pane layout: account/folder sidebar, message list, reader
 - Attachment indicator: messages with attachments are marked 📎 in the message list (every folder, including Sent), detected at sync time without fetching the body
-- Conversation thread view (`t`): see the whole conversation - including replies in other folders (e.g. Sent) - grouped by Message-ID / References, with a subject fallback; messages with attachments are marked 📎 and you can open the attachment viewer for the selected one with `a`
+- Conversation thread view (`t`): see the whole conversation - including replies in other folders (e.g. Sent) - grouped strictly by RFC 822 references (Message-ID / In-Reply-To / References), never by subject, so unrelated same-subject mail is not lumped together; messages with attachments are marked 📎 and you can open the attachment viewer for the selected one with `a`
 - HTML bodies rendered inline via `html2text` - no browser needed
 - Attachment viewer (centered modal): images rendered inline as truecolor half-blocks (works over SSH, no graphics protocol needed), PDF and Word (.docx) shown as extracted text, text/code/markdown inline; other binaries identified by MIME type and saved to disk
 - Resizable, draggable UI: drag pane dividers to resize the account/inbox/reading panes; drag the compose window to move/resize it - all remembered across restarts
@@ -59,7 +59,7 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 
 **AI agent integration**
 - MCP server (`imt mcp`) - expose your inbox as tools to any MCP-compatible AI agent
-- 12 tools covering the full read/write lifecycle: list, search, read, send, reply, move, flag, delete
+- 11 tools covering the full read/write lifecycle: list accounts/folders/messages, search, read, send, reply, mark read, flag, move, delete (send/reply accept file attachments)
 - One-line Claude Desktop config; works with any MCP client
 
 **Other**

@@ -65,10 +65,13 @@ schemas and examples.
   `send`/`reply` after they approve - sending email is irreversible and outward-facing.
 - **Never delete** unless the user explicitly asks; `delete_message` only moves to Trash.
 - Quote facts only from the actual message/thread; do not invent details.
-- For reading a conversation, fetch the message and its related messages (same
-  subject / References) so replies in Sent are included.
+- For reading a conversation, fetch the message and its related messages linked
+  by RFC 822 references (`Message-ID` / `In-Reply-To` / `References`) so replies
+  in Sent are included. Do not group by subject alone.
 
 ## Doing it interactively instead
 
 If the user would rather drive it themselves, just run `imt` for the full TUI
-(reply `r`, thread view `t`, compose AI-reply `Ctrl-G`, menu `F10`). See `README.md`.
+(reply `r`, thread view `t`, compose AI-reply `Ctrl-G`, AI-reply with an
+instruction `Ctrl-T`, menu `F10`; the menu bar and panes are mouse-clickable).
+See `README.md`.

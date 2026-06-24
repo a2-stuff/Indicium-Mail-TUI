@@ -65,7 +65,7 @@ The server implements MCP 2024-11-05 over JSON-RPC 2.0.
 
 ```jsonl
 → {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"claude","version":"1"}}}
-← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"imt-mcp","version":"0.0.18"}}}
+← {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"imt-mcp","version":"0.3.0"}}}
 → {"jsonrpc":"2.0","method":"initialized","params":{}}
 → {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
 ← {"jsonrpc":"2.0","id":2,"result":{"tools":[...]}}
