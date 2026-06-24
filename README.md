@@ -159,6 +159,7 @@ Mouse support is enabled, and the whole interface is clickable:
 - **Menu bar:** click a top menu to open its dropdown (or run it directly); click a dropdown item to run it; click away to close.
 - **Sidebar:** click an account to expand/collapse it, click a folder to switch to it.
 - **Message list:** click an email to open it in the reading pane.
+- **Add/Edit Account modal:** click any field to focus it (then type); clicking a cycler or checkbox (incoming protocol, auth type, TLS, keep-copy-on-server) also flips its value.
 - **Scroll wheel** scrolls whichever pane is under the cursor.
 - **Resize/move:** drag the dividers between the account, inbox, and reading panes to resize them; drag the compose window's title bar to move it and its bottom-right corner to resize it. Pane sizes and the compose window's position/size persist across restarts.
 

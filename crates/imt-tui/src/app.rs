@@ -476,6 +476,9 @@ pub struct App {
     pub ui_sidebar: ratatui::layout::Rect,
     pub ui_list: ratatui::layout::Rect,
     pub ui_reader: ratatui::layout::Rect,
+    /// Per-field rects of the onboarding modal (set during draw) so clicks can
+    /// focus the field under the cursor.
+    pub ui_onboarding_fields: Vec<(ratatui::layout::Rect, OnboardingField)>,
     /// Active pane-divider drag (1 = sidebar|list, 2 = list|reader).
     pub pane_drag: Option<u8>,
     /// Thread view state, when open.
@@ -780,6 +783,7 @@ impl App {
             ui_sidebar: ratatui::layout::Rect::default(),
             ui_list: ratatui::layout::Rect::default(),
             ui_reader: ratatui::layout::Rect::default(),
+            ui_onboarding_fields: Vec::new(),
             pane_drag: None,
             thread_state: None,
             current_thread_count: 0,
@@ -1443,6 +1447,12 @@ impl App {
             MouseEventKind::ScrollUp => self.scroll_at(m.column, m.row, -3),
             MouseEventKind::ScrollDown => self.scroll_at(m.column, m.row, 3),
             MouseEventKind::Down(MouseButton::Left) => {
+                // The onboarding modal owns the screen while open: a click focuses
+                // the field under the cursor (and toggles cyclers/checkboxes).
+                if self.mode == Mode::Onboarding {
+                    self.mouse_onboarding_down(m.column, m.row);
+                    return;
+                }
                 // Menu bar / open dropdown take priority (works from any non-modal
                 // mode so the bar is clickable even while reading).
                 if self.mouse_menu_down(m.column, m.row) {
@@ -1466,6 +1476,30 @@ impl App {
                     self.save_layout_prefs();
                 }
             }
+            _ => {}
+        }
+    }
+
+    /// Focus the onboarding field under the cursor. For text fields this just
+    /// moves focus (so typing lands there); for the cycler/checkbox fields
+    /// (protocol, auth type, TLS, keep-on-server) - which have no text cursor -
+    /// a click also advances/toggles the value.
+    fn mouse_onboarding_down(&mut self, col: u16, row: u16) {
+        let hit = self
+            .ui_onboarding_fields
+            .iter()
+            .find(|(r, _)| Self::rect_contains(*r, col, row))
+            .map(|(_, f)| *f);
+        let Some(field) = hit else { return };
+        if let Some(o) = self.onboarding.as_mut() {
+            o.field = field;
+        }
+        match field {
+            OnboardingField::Protocol
+            | OnboardingField::AuthType
+            | OnboardingField::ImapTls
+            | OnboardingField::SmtpTls
+            | OnboardingField::KeepOnServer => self.cycle_tls(1),
             _ => {}
         }
     }
@@ -2873,6 +2907,91 @@ mod mouse_tests {
 
     fn app() -> App {
         App::new(Arc::new(InMemoryDataSource::sample()))
+    }
+
+    fn typ(a: &mut App, s: &str) {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        for ch in s.chars() {
+            a.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()));
+        }
+    }
+    fn press(a: &mut App, code: crossterm::event::KeyCode) {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        a.handle_key(KeyEvent::new(code, KeyModifiers::empty()));
+    }
+
+    #[test]
+    fn onboarding_pop3_flow_fills_host_and_username() {
+        use crossterm::event::KeyCode;
+        use crate::keymap::OnboardingField;
+        let mut a = app();
+        a.open_onboarding();
+        // Display name, Email.
+        typ(&mut a, "Me");
+        press(&mut a, KeyCode::Tab);
+        typ(&mut a, "me@example.com");
+        press(&mut a, KeyCode::Tab);
+        // Now on Protocol; select POP3 with the right arrow.
+        assert_eq!(a.onboarding.as_ref().unwrap().field, OnboardingField::Protocol);
+        press(&mut a, KeyCode::Right);
+        assert_eq!(a.onboarding.as_ref().unwrap().incoming_protocol, IncomingProtocol::Pop3);
+        // Tab to the host field and type it.
+        press(&mut a, KeyCode::Tab);
+        assert_eq!(a.onboarding.as_ref().unwrap().field, OnboardingField::ImapHost);
+        typ(&mut a, "pop.example.com");
+        assert_eq!(a.onboarding.as_ref().unwrap().imap_host.value(), "pop.example.com");
+        // Walk down to the username field and type it.
+        for _ in 0..6 { press(&mut a, KeyCode::Tab); }
+        assert_eq!(a.onboarding.as_ref().unwrap().field, OnboardingField::Username);
+        typ(&mut a, "bob");
+        assert_eq!(a.onboarding.as_ref().unwrap().username.value(), "bob");
+    }
+
+    fn click(a: &mut App, col: u16, row: u16) {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind, KeyModifiers};
+        a.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: col,
+            row,
+            modifiers: KeyModifiers::empty(),
+        });
+    }
+
+    #[test]
+    fn clicking_an_onboarding_field_focuses_it() {
+        use crate::keymap::OnboardingField;
+        let mut a = app();
+        a.open_onboarding();
+        // Populate the field rects the way draw() would.
+        a.ui_onboarding_fields = vec![
+            (Rect { x: 2, y: 1, width: 60, height: 3 }, OnboardingField::DisplayName),
+            (Rect { x: 2, y: 10, width: 60, height: 3 }, OnboardingField::ImapHost),
+            (Rect { x: 2, y: 28, width: 60, height: 3 }, OnboardingField::Username),
+        ];
+        // Click the host field, then type - it must land in imap_host.
+        click(&mut a, 5, 11);
+        assert_eq!(a.onboarding.as_ref().unwrap().field, OnboardingField::ImapHost);
+        typ(&mut a, "pop.example.com");
+        assert_eq!(a.onboarding.as_ref().unwrap().imap_host.value(), "pop.example.com");
+        // Click the username field and type there.
+        click(&mut a, 5, 29);
+        assert_eq!(a.onboarding.as_ref().unwrap().field, OnboardingField::Username);
+        typ(&mut a, "bob");
+        assert_eq!(a.onboarding.as_ref().unwrap().username.value(), "bob");
+    }
+
+    #[test]
+    fn clicking_protocol_field_toggles_it() {
+        use crate::keymap::OnboardingField;
+        let mut a = app();
+        a.open_onboarding();
+        a.ui_onboarding_fields = vec![
+            (Rect { x: 2, y: 7, width: 60, height: 3 }, OnboardingField::Protocol),
+        ];
+        assert_eq!(a.onboarding.as_ref().unwrap().incoming_protocol, IncomingProtocol::Imap);
+        click(&mut a, 5, 8);
+        assert_eq!(a.onboarding.as_ref().unwrap().field, OnboardingField::Protocol);
+        assert_eq!(a.onboarding.as_ref().unwrap().incoming_protocol, IncomingProtocol::Pop3);
     }
 
     #[test]

@@ -12,7 +12,7 @@ use crate::theme;
 use crate::ui::layout::centered;
 
 /// Render the onboarding modal.
-pub fn render(f: &mut Frame, full: Rect, app: &App) {
+pub fn render(f: &mut Frame, full: Rect, app: &mut App) {
     let area = centered(full, 72, 94);
     f.render_widget(Clear, area);
 
@@ -75,28 +75,44 @@ pub fn render(f: &mut Frame, full: Rect, app: &App) {
     };
     f.render_widget(Paragraph::new(Span::styled(hint, theme::muted())), chunks[0]);
 
+    // Records each field's rect so a mouse click can focus it.
+    let mut field_rects: Vec<(Rect, OnboardingField)> = Vec::new();
+
     let cur = onboarding.field;
     let proto = onboarding.incoming_protocol.label();
     render_input(f, chunks[1], "Display name", onboarding.display_name.value(), cur == OnboardingField::DisplayName);
+    field_rects.push((chunks[1], OnboardingField::DisplayName));
     render_input(f, chunks[2], "Email", onboarding.email.value(), cur == OnboardingField::Email);
+    field_rects.push((chunks[2], OnboardingField::Email));
     render_field(f, chunks[3], "Incoming protocol  [←/→]", &format!("< {proto} >"), cur == OnboardingField::Protocol, false);
+    field_rects.push((chunks[3], OnboardingField::Protocol));
     render_input(f, chunks[4], &format!("{proto} host"), onboarding.imap_host.value(), cur == OnboardingField::ImapHost);
+    field_rects.push((chunks[4], OnboardingField::ImapHost));
     render_input(f, chunks[5], &format!("{proto} port"), onboarding.imap_port.value(), cur == OnboardingField::ImapPort);
+    field_rects.push((chunks[5], OnboardingField::ImapPort));
     render_field(f, chunks[6], &format!("{proto} TLS"), &format!("< {} >", tls_label(onboarding.imap_tls)), cur == OnboardingField::ImapTls, false);
+    field_rects.push((chunks[6], OnboardingField::ImapTls));
     render_input(f, chunks[7], "SMTP host", onboarding.smtp_host.value(), cur == OnboardingField::SmtpHost);
+    field_rects.push((chunks[7], OnboardingField::SmtpHost));
     render_input(f, chunks[8], "SMTP port", onboarding.smtp_port.value(), cur == OnboardingField::SmtpPort);
+    field_rects.push((chunks[8], OnboardingField::SmtpPort));
     render_field(f, chunks[9], "SMTP TLS", &format!("< {} >", tls_label(onboarding.smtp_tls)), cur == OnboardingField::SmtpTls, false);
+    field_rects.push((chunks[9], OnboardingField::SmtpTls));
     render_input(f, chunks[10], "Username", onboarding.username.value(), cur == OnboardingField::Username);
+    field_rects.push((chunks[10], OnboardingField::Username));
 
     let auth_label = if oauth2 { "< OAuth2 >" } else { "< Password >" };
     render_field(f, chunks[11], "Auth type  [←/→]", auth_label, cur == OnboardingField::AuthType, false);
+    field_rects.push((chunks[11], OnboardingField::AuthType));
 
     let mut idx = 12usize;
     if oauth2 {
         render_input(f, chunks[idx], "Client ID", onboarding.client_id.value(), cur == OnboardingField::ClientId);
+        field_rects.push((chunks[idx], OnboardingField::ClientId));
         idx += 1;
         let secret_masked: String = "*".repeat(onboarding.client_secret.value().chars().count());
         render_input(f, chunks[idx], "Client Secret (optional)", &secret_masked, cur == OnboardingField::ClientSecret);
+        field_rects.push((chunks[idx], OnboardingField::ClientSecret));
         idx += 1;
         if url_height > 0 {
             if let Some(url) = &onboarding.oauth_auth_url {
@@ -113,10 +129,12 @@ pub fn render(f: &mut Frame, full: Rect, app: &App) {
             }
         }
         render_input(f, chunks[idx], "Auth Code (from redirect URL ?code=...)", onboarding.auth_code.value(), cur == OnboardingField::AuthCode);
+        field_rects.push((chunks[idx], OnboardingField::AuthCode));
         idx += 1;
     } else {
         let masked: String = "*".repeat(onboarding.password.value().chars().count());
         render_input(f, chunks[idx], "Password", &masked, cur == OnboardingField::Password);
+        field_rects.push((chunks[idx], OnboardingField::Password));
         idx += 1;
     }
 
@@ -130,7 +148,10 @@ pub fn render(f: &mut Frame, full: Rect, app: &App) {
         cur == OnboardingField::KeepOnServer,
         false,
     );
+    field_rects.push((chunks[idx], OnboardingField::KeepOnServer));
     idx += 1;
+
+    app.ui_onboarding_fields = field_rects;
 
     let footer_idx = idx + 1; // skip Min(0)
     if footer_idx < chunks.len() {
