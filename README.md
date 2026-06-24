@@ -54,6 +54,7 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 - Interactive onboarding modal with provider auto-fill for Gmail, Outlook, Fastmail, Yahoo, and iCloud
 - Password auth or full OAuth2 (PKCE) - switch auth type inside the modal with `←/→`
 - OAuth2 for Gmail, Microsoft 365, Yahoo Mail, and any custom provider; auth URL opens automatically, token exchange and refresh happen in the background
+- "Keep copy on server" per-account toggle (default on). Turn it off for POP3-style behavior: a message is removed from the server once its body is downloaded, while the local copy stays in the client
 - Multi-account support with an account manager (`m`)
 
 **AI agent integration**

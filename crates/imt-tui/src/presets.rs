@@ -68,5 +68,6 @@ pub fn preset_for(email: &str) -> Option<NewAccountForm> {
         oauth_code: String::new(),
         oauth_verifier: String::new(),
         oauth_redirect_uri: String::new(),
+        keep_on_server: true,
     })
 }

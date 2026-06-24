@@ -185,6 +185,12 @@ pub trait MailBackend: Send {
     /// and issuing EXPUNGE. Used for "empty trash".
     async fn expunge_folder(&mut self, folder: &str) -> Result<()>;
 
+    /// Permanently remove a single message (`uid`) from `folder`: mark it
+    /// `\Deleted` and expunge just that UID (via UID EXPUNGE when the server
+    /// advertises UIDPLUS, otherwise a folder EXPUNGE). Used for the per-account
+    /// "do not leave a copy on the server" option after a body is downloaded.
+    async fn delete_uid(&mut self, folder: &str, uid: u32) -> Result<()>;
+
     /// Begin an IDLE session against `folder`. Falls back to polling if the
     /// server does not advertise IDLE.
     async fn idle(&mut self, folder: &str) -> Result<IdleHandle>;

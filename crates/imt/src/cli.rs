@@ -111,6 +111,7 @@ pub async fn add_account(db_path: &Path, args: AddAccountArgs) -> Result<()> {
         oauth_code: String::new(),
         oauth_verifier: String::new(),
         oauth_redirect_uri: String::new(),
+        keep_on_server: true,
     };
 
     let order = AccountRepo::new(db.pool()).list().await?.len() as i32;

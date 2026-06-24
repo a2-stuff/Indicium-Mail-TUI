@@ -255,6 +255,8 @@ pub struct OnboardingState {
     pub detected_provider: Option<String>,
     /// Last-applied email domain for preset detection.
     pub last_preset_domain: Option<String>,
+    /// Leave a copy of downloaded messages on the server (default true).
+    pub keep_on_server: bool,
 }
 
 impl OnboardingState {
@@ -285,6 +287,7 @@ impl OnboardingState {
             user_edited_smtp: false,
             detected_provider: None,
             last_preset_domain: None,
+            keep_on_server: true,
         }
     }
 
@@ -345,6 +348,7 @@ impl OnboardingState {
                 oauth_code: code,
                 oauth_verifier: verifier,
                 oauth_redirect_uri: self.oauth_redirect_uri.clone(),
+                keep_on_server: self.keep_on_server,
             });
         }
         Ok(NewAccountForm {
@@ -363,6 +367,7 @@ impl OnboardingState {
             oauth_code: String::new(),
             oauth_verifier: String::new(),
             oauth_redirect_uri: String::new(),
+            keep_on_server: self.keep_on_server,
         })
     }
 }
@@ -1203,6 +1208,12 @@ impl App {
                     OnboardingField::ClientId => { o.client_id.handle_event(&evt); }
                     OnboardingField::ClientSecret => { o.client_secret.handle_event(&evt); }
                     OnboardingField::AuthCode => { o.auth_code.handle_event(&evt); }
+                    OnboardingField::KeepOnServer => {
+                        // Space toggles the checkbox (←/→ also cycle it).
+                        if matches!(key.code, crossterm::event::KeyCode::Char(' ')) {
+                            o.keep_on_server = !o.keep_on_server;
+                        }
+                    }
                     OnboardingField::ImapTls | OnboardingField::SmtpTls | OnboardingField::AuthType => {}
                 }
                 if email_changed {
@@ -1990,6 +2001,10 @@ impl App {
             o.use_oauth2 = !o.use_oauth2;
             return;
         }
+        if o.field == OnboardingField::KeepOnServer {
+            o.keep_on_server = !o.keep_on_server;
+            return;
+        }
         let target = match o.field {
             OnboardingField::ImapTls => &mut o.imap_tls,
             OnboardingField::SmtpTls => &mut o.smtp_tls,
@@ -2291,6 +2306,7 @@ impl App {
             imt_core::AuthMethod::OAuth2 { username, .. } => username.clone(),
         };
         form.username = tui_input::Input::new(user);
+        form.keep_on_server = acc.keep_on_server;
         form.user_edited_imap = true;
         form.user_edited_smtp = true;
         self.onboarding_edit_id = Some(acc.id);

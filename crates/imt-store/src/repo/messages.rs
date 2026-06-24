@@ -330,6 +330,7 @@ mod has_attachments_tests {
             imap: ImapConfig { host: "imap".into(), port: 993, tls: Tls::Implicit, auth: auth.clone() },
             smtp: SmtpConfig { host: "smtp".into(), port: 465, tls: Tls::Implicit, auth },
             order: 0,
+            keep_on_server: true,
         }
     }
 

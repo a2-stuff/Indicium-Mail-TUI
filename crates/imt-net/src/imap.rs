@@ -101,6 +101,7 @@ pub struct ImapBackend {
     session: Arc<Mutex<SessionSlot>>,
     has_idle: Arc<Mutex<Option<bool>>>,
     has_move: Arc<Mutex<Option<bool>>>,
+    has_uidplus: Arc<Mutex<Option<bool>>>,
 }
 
 /// Holds either an owned session, an active IDLE handle, or nothing.
@@ -166,6 +167,7 @@ impl ImapBackend {
             session: Arc::new(Mutex::new(SessionSlot::Empty)),
             has_idle: Arc::new(Mutex::new(None)),
             has_move: Arc::new(Mutex::new(None)),
+            has_uidplus: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -535,15 +537,16 @@ impl MailBackend for ImapBackend {
         let mut session = self.open_session().await?;
         // Probe IDLE capability once at connect time so later `idle()` calls can
         // pick the push or polling implementation without an extra round-trip.
-        let (has_idle, has_move) = match session.capabilities().await {
-            Ok(caps) => (caps.has_str("IDLE"), caps.has_str("MOVE")),
+        let (has_idle, has_move, has_uidplus) = match session.capabilities().await {
+            Ok(caps) => (caps.has_str("IDLE"), caps.has_str("MOVE"), caps.has_str("UIDPLUS")),
             Err(e) => {
-                tracing::debug!(error = %e, "CAPABILITY probe failed; assuming no IDLE/MOVE");
-                (false, false)
+                tracing::debug!(error = %e, "CAPABILITY probe failed; assuming no IDLE/MOVE/UIDPLUS");
+                (false, false, false)
             }
         };
         *self.has_idle.lock().await = Some(has_idle);
         *self.has_move.lock().await = Some(has_move);
+        *self.has_uidplus.lock().await = Some(has_uidplus);
         *self.session.lock().await = SessionSlot::Owned(Box::new(session));
         Ok(())
     }
@@ -802,6 +805,42 @@ impl MailBackend for ImapBackend {
             .expunge()
             .await
             .map_err(|e| NetError::Protocol(format!("expunge: {}", e)))?;
+        Ok(())
+    }
+
+    async fn delete_uid(&mut self, folder: &str, uid: u32) -> Result<()> {
+        let supports_uidplus = self.has_uidplus.lock().await.unwrap_or(false);
+        let mut guard = self.session.lock().await;
+        let session = guard.as_mut_owned()?;
+        session
+            .select(folder)
+            .await
+            .map_err(|e| NetError::Protocol(format!("select {}: {}", folder, e)))?;
+        let stream = session
+            .uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)")
+            .await
+            .map_err(|e| NetError::Protocol(format!("store deleted: {}", e)))?;
+        let _: Vec<_> = stream
+            .try_collect()
+            .await
+            .map_err(|e| NetError::Protocol(format!("store drain: {}", e)))?;
+        if supports_uidplus {
+            // UID EXPUNGE removes only this message, leaving any other messages
+            // a concurrent client may have marked \Deleted untouched.
+            let stream = session
+                .uid_expunge(uid.to_string())
+                .await
+                .map_err(|e| NetError::Protocol(format!("uid expunge: {}", e)))?;
+            let _: Vec<_> = stream
+                .try_collect()
+                .await
+                .map_err(|e| NetError::Protocol(format!("uid expunge drain: {}", e)))?;
+        } else {
+            let _stream = session
+                .expunge()
+                .await
+                .map_err(|e| NetError::Protocol(format!("expunge: {}", e)))?;
+        }
         Ok(())
     }
 

@@ -97,6 +97,11 @@ pub struct SmtpConfig {
     pub auth: AuthMethod,
 }
 
+/// Default for `keep_on_server` (true = leave a copy on the server).
+fn default_keep_on_server() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub id: AccountId,
@@ -106,6 +111,11 @@ pub struct Account {
     pub smtp: SmtpConfig,
     /// Display order in the sidebar.
     pub order: i32,
+    /// When false, a message is deleted from the IMAP server once its full body
+    /// has been downloaded locally (POP3-style "do not leave a copy"). Defaults
+    /// to true so nothing is removed from the server unless the user opts in.
+    #[serde(default = "default_keep_on_server")]
+    pub keep_on_server: bool,
 }
 
 /// User-supplied form data when adding a new account.
@@ -132,6 +142,9 @@ pub struct NewAccountForm {
     pub oauth_verifier: String,
     /// Redirect URI used when generating the auth URL.
     pub oauth_redirect_uri: String,
+    /// Leave a copy of downloaded messages on the server (default true).
+    #[serde(default = "default_keep_on_server")]
+    pub keep_on_server: bool,
 }
 
 impl NewAccountForm {
@@ -152,6 +165,7 @@ impl NewAccountForm {
             oauth_code: String::new(),
             oauth_verifier: String::new(),
             oauth_redirect_uri: String::new(),
+            keep_on_server: true,
         }
     }
 
@@ -184,6 +198,7 @@ impl NewAccountForm {
             imap: ImapConfig { host: self.imap_host, port: self.imap_port, tls: self.imap_tls, auth: auth.clone() },
             smtp: SmtpConfig { host: self.smtp_host, port: self.smtp_port, tls: self.smtp_tls, auth },
             order,
+            keep_on_server: self.keep_on_server,
         }
     }
 }

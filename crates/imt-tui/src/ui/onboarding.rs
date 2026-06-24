@@ -58,6 +58,7 @@ pub fn render(f: &mut Frame, full: Rect, app: &App) {
     } else {
         constraints.push(Constraint::Length(3)); // password
     }
+    constraints.push(Constraint::Length(3)); // keep copy on server
     constraints.push(Constraint::Min(0));
     constraints.push(Constraint::Length(1)); // footer
 
@@ -115,6 +116,18 @@ pub fn render(f: &mut Frame, full: Rect, app: &App) {
         render_input(f, chunks[idx], "Password", &masked, cur == OnboardingField::Password);
         idx += 1;
     }
+
+    // Keep-a-copy-on-server checkbox (shown for both auth branches).
+    let check = if onboarding.keep_on_server { "[x]" } else { "[ ]" };
+    render_field(
+        f,
+        chunks[idx],
+        "Keep copy on server  [Space/←/→]",
+        &format!("{check} leave downloaded mail on the server"),
+        cur == OnboardingField::KeepOnServer,
+        false,
+    );
+    idx += 1;
 
     let footer_idx = idx + 1; // skip Min(0)
     if footer_idx < chunks.len() {

@@ -49,6 +49,8 @@ pub enum OnboardingField {
     ClientId,
     ClientSecret,
     AuthCode,
+    // Account-level: leave a copy on the server (checkbox, both branches).
+    KeepOnServer,
 }
 
 impl OnboardingField {
@@ -65,16 +67,17 @@ impl OnboardingField {
             Self::SmtpTls => Self::Username,
             Self::Username => Self::AuthType,
             Self::AuthType => if oauth2 { Self::ClientId } else { Self::Password },
-            Self::Password => Self::DisplayName,
+            Self::Password => Self::KeepOnServer,
             Self::ClientId => Self::ClientSecret,
             Self::ClientSecret => Self::AuthCode,
-            Self::AuthCode => Self::DisplayName,
+            Self::AuthCode => Self::KeepOnServer,
+            Self::KeepOnServer => Self::DisplayName,
         }
     }
     /// Cycle to the previous onboarding field.
     pub fn prev(self, oauth2: bool) -> Self {
         match self {
-            Self::DisplayName => if oauth2 { Self::AuthCode } else { Self::Password },
+            Self::DisplayName => Self::KeepOnServer,
             Self::Email => Self::DisplayName,
             Self::ImapHost => Self::Email,
             Self::ImapPort => Self::ImapHost,
@@ -88,6 +91,7 @@ impl OnboardingField {
             Self::ClientId => Self::AuthType,
             Self::ClientSecret => Self::ClientId,
             Self::AuthCode => Self::ClientSecret,
+            Self::KeepOnServer => if oauth2 { Self::AuthCode } else { Self::Password },
         }
     }
 }

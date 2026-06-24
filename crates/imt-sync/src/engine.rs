@@ -219,12 +219,34 @@ impl SyncEngine {
         let folder = FolderRepo::new(self.db.pool()).get(msg.folder_id).await?;
         let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
 
+        let keep_on_server = acc.keep_on_server;
         let provider = imap_provider_for(&acc);
         let mut backend = ImapBackend::new(acc, provider);
         backend.connect().await?;
         let body = backend.fetch_body(&folder.path, msg.uid.0).await?;
         msg_repo.set_body(message_id, &body).await?;
         let _ = self.tx.send(SyncEvent::MessageBodyFetched { message_id });
+
+        // "Do not leave a copy on the server": now that the full body is stored
+        // locally, remove the message from the server. The local copy (with its
+        // body) is kept - neither sync path purges messages that vanish from the
+        // server, so the user still sees it in the TUI.
+        if !keep_on_server {
+            if let Err(e) = backend.delete_uid(&folder.path, msg.uid.0).await {
+                tracing::warn!(
+                    target: "imt-sync::engine",
+                    "delete-after-download failed for uid {}: {} - copy left on server",
+                    msg.uid.0, e
+                );
+            } else {
+                tracing::info!(
+                    target: "imt-sync::engine",
+                    "removed uid {} from server after download (keep_on_server=false)",
+                    msg.uid.0
+                );
+            }
+        }
+
         let _ = backend.disconnect().await;
         Ok(body)
     }

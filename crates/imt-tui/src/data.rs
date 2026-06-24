@@ -360,6 +360,7 @@ fn make_account(name: &str, email: &str, order: i32) -> Account {
             auth,
         },
         order,
+        keep_on_server: true,
     }
 }
 

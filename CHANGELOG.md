@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Message list:** click an email to select it and open it in the reading pane.
   - **Reading pane:** click to focus it.
   - **Scroll wheel** scrolls whichever pane is under the cursor (reading pane scrolls lines, message list moves the selection, sidebar moves through folders).
+- **"Keep copy on server" account option** (checkbox in Add/Edit Account, default **on**). When left on, downloaded mail stays on the server (normal IMAP behavior). When turned off, a message is permanently removed from the server once its full body has been downloaded locally (POP3-style "do not leave a copy") - the local copy is kept so it still shows in the client. Toggle with `Space` or `←/→`. Server removal uses a targeted `UID EXPUNGE` where the server supports UIDPLUS, otherwise a folder `EXPUNGE`. Persisted via migration `0006`.
 
 ### Changed
 - The AI reply instruction dialog moved from `Ctrl-Shift-G` to `Ctrl-T` so it works on terminals without the enhanced keyboard protocol (`Ctrl-Shift-G` still works where supported).
