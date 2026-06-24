@@ -352,6 +352,7 @@ fn make_account(name: &str, email: &str, order: i32) -> Account {
             port: 993,
             tls: Tls::Implicit,
             auth: auth.clone(),
+            protocol: Default::default(),
         },
         smtp: SmtpConfig {
             host: "smtp.example.com".to_string(),

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crossterm::event::KeyEvent;
-use imt_core::{Account, AccountId, Address, Draft, Folder, FolderId, Message, MessageBody, NewAccountForm, Tls};
+use imt_core::{Account, AccountId, Address, Draft, Folder, FolderId, IncomingProtocol, Message, MessageBody, NewAccountForm, Tls};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 use tui_textarea::TextArea;
@@ -215,6 +215,8 @@ pub struct OnboardingState {
     pub display_name: Input,
     /// Email input.
     pub email: Input,
+    /// Incoming protocol (IMAP or POP3).
+    pub incoming_protocol: IncomingProtocol,
     /// IMAP host input.
     pub imap_host: Input,
     /// IMAP port input (numeric).
@@ -267,6 +269,7 @@ impl OnboardingState {
             field: OnboardingField::DisplayName,
             display_name: Input::default(),
             email: Input::default(),
+            incoming_protocol: defaults.incoming_protocol,
             imap_host: Input::new(defaults.imap_host),
             imap_port: Input::new(defaults.imap_port.to_string()),
             imap_tls: defaults.imap_tls,
@@ -335,6 +338,7 @@ impl OnboardingState {
             return Ok(NewAccountForm {
                 display_name: self.display_name.value().trim().to_string(),
                 email,
+                incoming_protocol: self.incoming_protocol,
                 imap_host,
                 imap_port,
                 imap_tls: self.imap_tls,
@@ -354,6 +358,7 @@ impl OnboardingState {
         Ok(NewAccountForm {
             display_name: self.display_name.value().trim().to_string(),
             email,
+            incoming_protocol: self.incoming_protocol,
             imap_host,
             imap_port,
             imap_tls: self.imap_tls,
@@ -369,6 +374,19 @@ impl OnboardingState {
             oauth_redirect_uri: String::new(),
             keep_on_server: self.keep_on_server,
         })
+    }
+    /// Switch the incoming protocol (IMAP <-> POP3). When the user has not
+    /// manually edited the incoming port, snap it to the new protocol's
+    /// conventional implicit-TLS port (993 <-> 995).
+    pub fn toggle_protocol(&mut self) {
+        self.incoming_protocol = match self.incoming_protocol {
+            IncomingProtocol::Imap => IncomingProtocol::Pop3,
+            IncomingProtocol::Pop3 => IncomingProtocol::Imap,
+        };
+        if !self.user_edited_imap {
+            let port = self.incoming_protocol.default_tls_port();
+            self.imap_port = Input::new(port.to_string());
+        }
     }
 }
 
@@ -1214,6 +1232,12 @@ impl App {
                             o.keep_on_server = !o.keep_on_server;
                         }
                     }
+                    OnboardingField::Protocol => {
+                        // Space toggles the protocol (←/→ also cycle it).
+                        if matches!(key.code, crossterm::event::KeyCode::Char(' ')) {
+                            o.toggle_protocol();
+                        }
+                    }
                     OnboardingField::ImapTls | OnboardingField::SmtpTls | OnboardingField::AuthType => {}
                 }
                 if email_changed {
@@ -2005,6 +2029,10 @@ impl App {
             o.keep_on_server = !o.keep_on_server;
             return;
         }
+        if o.field == OnboardingField::Protocol {
+            o.toggle_protocol();
+            return;
+        }
         let target = match o.field {
             OnboardingField::ImapTls => &mut o.imap_tls,
             OnboardingField::SmtpTls => &mut o.smtp_tls,
@@ -2295,6 +2323,7 @@ impl App {
         let mut form = OnboardingState::new();
         form.display_name = tui_input::Input::new(acc.display_name.clone());
         form.email = tui_input::Input::new(acc.address.email.clone());
+        form.incoming_protocol = acc.imap.protocol;
         form.imap_host = tui_input::Input::new(acc.imap.host.clone());
         form.imap_port = tui_input::Input::new(acc.imap.port.to_string());
         form.imap_tls = acc.imap.tls;

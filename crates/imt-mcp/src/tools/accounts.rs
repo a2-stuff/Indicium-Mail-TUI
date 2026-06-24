@@ -23,6 +23,7 @@ pub async fn list_accounts(ctx: &McpContext, _params: Value) -> anyhow::Result<V
                 "id": a.id.0.to_string(),
                 "display_name": a.display_name,
                 "email": a.address.email,
+                "protocol": a.imap.protocol.label(),
                 "imap_host": a.imap.host,
                 "imap_port": a.imap.port,
                 "smtp_host": a.smtp.host,

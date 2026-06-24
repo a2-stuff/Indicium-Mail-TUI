@@ -336,7 +336,7 @@ fn extract_in_reply_to(value: &HeaderValue<'_>) -> Option<String> {
     }
 }
 
-fn parse_headers_from_bytes(bytes: &[u8]) -> Result<MessageHeaders> {
+pub(crate) fn parse_headers_from_bytes(bytes: &[u8]) -> Result<MessageHeaders> {
     let parsed = MessageParser::default()
         .parse(bytes)
         .ok_or_else(|| NetError::Parse("could not parse RFC 822 headers".into()))?;
@@ -407,7 +407,7 @@ fn bodystructure_has_attachments(bs: &BodyStructure) -> bool {
 /// inline images) are present. Avoids a body fetch; the exact attachment list
 /// replaces this once the full body is fetched. Used as a fallback when the
 /// server does not return BODYSTRUCTURE.
-fn header_has_attachments(bytes: &[u8]) -> bool {
+pub(crate) fn header_has_attachments(bytes: &[u8]) -> bool {
     let Some(parsed) = MessageParser::default().parse(bytes) else {
         return false;
     };
@@ -469,7 +469,7 @@ fn save_attachment_temp(filename: &str, data: &[u8]) -> Option<std::path::PathBu
     Some(path)
 }
 
-fn parse_full_body(bytes: &[u8]) -> Result<MessageBody> {
+pub(crate) fn parse_full_body(bytes: &[u8]) -> Result<MessageBody> {
     let parsed = MessageParser::default()
         .parse(bytes)
         .ok_or_else(|| NetError::Parse("could not parse RFC 822 body".into()))?;

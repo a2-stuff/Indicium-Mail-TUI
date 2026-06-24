@@ -57,6 +57,9 @@ enum Cmd {
         display_name: Option<String>,
         #[arg(long)]
         username: Option<String>,
+        /// Receiving protocol: imap (default) or pop3.
+        #[arg(long, default_value = "imap", value_parser = ["imap", "pop3"])]
+        protocol: String,
         #[arg(long)]
         imap_host: Option<String>,
         #[arg(long, default_value_t = 993)]
@@ -131,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
             email,
             display_name,
             username,
+            protocol,
             imap_host,
             imap_port,
             imap_tls,
@@ -144,6 +148,7 @@ async fn main() -> anyhow::Result<()> {
                     email,
                     display_name,
                     username,
+                    protocol,
                     imap_host,
                     imap_port,
                     imap_tls,

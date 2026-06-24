@@ -39,9 +39,10 @@ pub fn render(f: &mut Frame, full: Rect, app: &App) {
         Constraint::Length(1), // hint
         Constraint::Length(3), // display name
         Constraint::Length(3), // email
-        Constraint::Length(3), // imap host
-        Constraint::Length(3), // imap port
-        Constraint::Length(3), // imap tls
+        Constraint::Length(3), // incoming protocol
+        Constraint::Length(3), // imap/pop3 host
+        Constraint::Length(3), // imap/pop3 port
+        Constraint::Length(3), // imap/pop3 tls
         Constraint::Length(3), // smtp host
         Constraint::Length(3), // smtp port
         Constraint::Length(3), // smtp tls
@@ -75,20 +76,22 @@ pub fn render(f: &mut Frame, full: Rect, app: &App) {
     f.render_widget(Paragraph::new(Span::styled(hint, theme::muted())), chunks[0]);
 
     let cur = onboarding.field;
+    let proto = onboarding.incoming_protocol.label();
     render_input(f, chunks[1], "Display name", onboarding.display_name.value(), cur == OnboardingField::DisplayName);
     render_input(f, chunks[2], "Email", onboarding.email.value(), cur == OnboardingField::Email);
-    render_input(f, chunks[3], "IMAP host", onboarding.imap_host.value(), cur == OnboardingField::ImapHost);
-    render_input(f, chunks[4], "IMAP port", onboarding.imap_port.value(), cur == OnboardingField::ImapPort);
-    render_field(f, chunks[5], "IMAP TLS", &format!("< {} >", tls_label(onboarding.imap_tls)), cur == OnboardingField::ImapTls, false);
-    render_input(f, chunks[6], "SMTP host", onboarding.smtp_host.value(), cur == OnboardingField::SmtpHost);
-    render_input(f, chunks[7], "SMTP port", onboarding.smtp_port.value(), cur == OnboardingField::SmtpPort);
-    render_field(f, chunks[8], "SMTP TLS", &format!("< {} >", tls_label(onboarding.smtp_tls)), cur == OnboardingField::SmtpTls, false);
-    render_input(f, chunks[9], "Username", onboarding.username.value(), cur == OnboardingField::Username);
+    render_field(f, chunks[3], "Incoming protocol  [←/→]", &format!("< {proto} >"), cur == OnboardingField::Protocol, false);
+    render_input(f, chunks[4], &format!("{proto} host"), onboarding.imap_host.value(), cur == OnboardingField::ImapHost);
+    render_input(f, chunks[5], &format!("{proto} port"), onboarding.imap_port.value(), cur == OnboardingField::ImapPort);
+    render_field(f, chunks[6], &format!("{proto} TLS"), &format!("< {} >", tls_label(onboarding.imap_tls)), cur == OnboardingField::ImapTls, false);
+    render_input(f, chunks[7], "SMTP host", onboarding.smtp_host.value(), cur == OnboardingField::SmtpHost);
+    render_input(f, chunks[8], "SMTP port", onboarding.smtp_port.value(), cur == OnboardingField::SmtpPort);
+    render_field(f, chunks[9], "SMTP TLS", &format!("< {} >", tls_label(onboarding.smtp_tls)), cur == OnboardingField::SmtpTls, false);
+    render_input(f, chunks[10], "Username", onboarding.username.value(), cur == OnboardingField::Username);
 
     let auth_label = if oauth2 { "< OAuth2 >" } else { "< Password >" };
-    render_field(f, chunks[10], "Auth type  [←/→]", auth_label, cur == OnboardingField::AuthType, false);
+    render_field(f, chunks[11], "Auth type  [←/→]", auth_label, cur == OnboardingField::AuthType, false);
 
-    let mut idx = 11usize;
+    let mut idx = 12usize;
     if oauth2 {
         render_input(f, chunks[idx], "Client ID", onboarding.client_id.value(), cur == OnboardingField::ClientId);
         idx += 1;

@@ -55,6 +55,7 @@ pub fn preset_for(email: &str) -> Option<NewAccountForm> {
     Some(NewAccountForm {
         display_name: String::new(),
         email: String::new(),
+        incoming_protocol: Default::default(),
         imap_host: imap_host.to_string(),
         imap_port,
         imap_tls,

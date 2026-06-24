@@ -34,6 +34,8 @@ pub enum Mode {
 pub enum OnboardingField {
     DisplayName,
     Email,
+    // Incoming protocol selection — IMAP or POP3.
+    Protocol,
     ImapHost,
     ImapPort,
     ImapTls,
@@ -58,7 +60,8 @@ impl OnboardingField {
     pub fn next(self, oauth2: bool) -> Self {
         match self {
             Self::DisplayName => Self::Email,
-            Self::Email => Self::ImapHost,
+            Self::Email => Self::Protocol,
+            Self::Protocol => Self::ImapHost,
             Self::ImapHost => Self::ImapPort,
             Self::ImapPort => Self::ImapTls,
             Self::ImapTls => Self::SmtpHost,
@@ -79,7 +82,8 @@ impl OnboardingField {
         match self {
             Self::DisplayName => Self::KeepOnServer,
             Self::Email => Self::DisplayName,
-            Self::ImapHost => Self::Email,
+            Self::Protocol => Self::Email,
+            Self::ImapHost => Self::Protocol,
             Self::ImapPort => Self::ImapHost,
             Self::ImapTls => Self::ImapPort,
             Self::SmtpHost => Self::ImapTls,

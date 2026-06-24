@@ -23,10 +23,15 @@ IMT_PASSWORD='app-password' imt add-account \
   --email you@example.com \
   --imap-host imap.example.com --imap-port 993 --imap-tls implicit \
   --smtp-host smtp.example.com --smtp-port 465 --smtp-tls implicit
+
+# POP3 instead of IMAP: add --protocol pop3 (the --imap-* flags then carry the
+# POP3 host/port/TLS; 995 is the usual implicit-TLS port). SMTP is unchanged.
 ```
 
 If `cargo`/`imt` is missing, tell the user to install Rust (`rustup`) and run the
 commands above. Provider auto-fill exists for common hosts via `imt add-account`.
+The interactive onboarding modal (`A` in the TUI) also offers an IMAP/POP3
+protocol selector and a "Keep copy on server" toggle.
 
 ## 2. Register the MCP server (one-time, for the agent host)
 

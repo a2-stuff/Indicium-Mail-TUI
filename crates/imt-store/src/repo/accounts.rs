@@ -124,7 +124,7 @@ mod tests {
             id: AccountId::new(),
             display_name: "Me".into(),
             address: Address { name: Some("Me".into()), email: "me@example.com".into() },
-            imap: ImapConfig { host: "imap".into(), port: 993, tls: Tls::Implicit, auth: auth.clone() },
+            imap: ImapConfig { host: "imap".into(), port: 993, tls: Tls::Implicit, auth: auth.clone(), protocol: Default::default() },
             smtp: SmtpConfig { host: "smtp".into(), port: 465, tls: Tls::Implicit, auth },
             order: 0,
             keep_on_server: keep,

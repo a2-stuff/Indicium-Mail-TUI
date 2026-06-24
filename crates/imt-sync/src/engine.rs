@@ -11,9 +11,8 @@ use imt_core::{
     Account, AccountId, Address, Draft, Flag, FolderId, FolderRole, Message, MessageBody,
     MessageId, SyncEvent, Uid,
 };
-use imt_net::backend::MailBackend;
 use imt_net::smtp::{BuildDraft, DraftAttachmentRef};
-use imt_net::{build_rfc822, ImapBackend, SmtpSender};
+use imt_net::{build_rfc822, SmtpSender};
 use imt_store::{secrets, AccountRepo, Db, DraftRepo, FolderRepo, MessageRepo};
 
 use crate::account_task::{run as run_account_task, AccountTaskCtx};
@@ -121,7 +120,7 @@ impl SyncEngine {
         let folder = FolderRepo::new(self.db.pool()).get(folder_id).await?;
 
         let provider = imap_provider_for(&acc);
-        let mut backend = ImapBackend::new(acc.clone(), provider);
+        let mut backend = crate::backend::make_backend(&acc, provider);
         backend.connect().await?;
 
         let _ = self.tx.send(SyncEvent::SyncStarted {
@@ -221,7 +220,7 @@ impl SyncEngine {
 
         let keep_on_server = acc.keep_on_server;
         let provider = imap_provider_for(&acc);
-        let mut backend = ImapBackend::new(acc, provider);
+        let mut backend = crate::backend::make_backend(&acc, provider);
         backend.connect().await?;
         let body = backend.fetch_body(&folder.path, msg.uid.0).await?;
         msg_repo.set_body(message_id, &body).await?;
@@ -304,7 +303,7 @@ impl SyncEngine {
         let sent_folder = find_sent_folder(&self.db, acc.id).await;
         if let Some(sent) = sent_folder {
             let provider = imap_provider_for(&acc);
-            let mut backend = ImapBackend::new(acc.clone(), provider);
+            let mut backend = crate::backend::make_backend(&acc, provider);
             match backend.connect().await {
                 Ok(()) => {
                     if let Err(e) = backend.append(&sent.path, &raw, &[Flag::Seen]).await {
@@ -336,7 +335,7 @@ impl SyncEngine {
         let was_unread = !msg.flags.contains(&Flag::Seen);
 
         let provider = imap_provider_for(&acc);
-        let mut backend = ImapBackend::new(acc, provider);
+        let mut backend = crate::backend::make_backend(&acc, provider);
         backend.connect().await?;
         backend.move_uid(&src_folder.path, msg.uid.0, &dst_folder.path).await?;
         let _ = backend.disconnect().await;
@@ -388,7 +387,7 @@ impl SyncEngine {
         let acc = AccountRepo::new(self.db.pool()).get(folder.account_id).await?;
 
         let provider = imap_provider_for(&acc);
-        let mut backend = ImapBackend::new(acc, provider);
+        let mut backend = crate::backend::make_backend(&acc, provider);
         backend.connect().await?;
         backend.expunge_folder(&folder.path).await?;
         let _ = backend.disconnect().await;
@@ -412,7 +411,7 @@ impl SyncEngine {
         let acc = AccountRepo::new(self.db.pool()).get(msg.account_id).await?;
 
         let provider = imap_provider_for(&acc);
-        let mut backend = ImapBackend::new(acc, provider);
+        let mut backend = crate::backend::make_backend(&acc, provider);
         backend.connect().await?;
 
         let (add_v, rem_v): (Vec<Flag>, Vec<Flag>) = if add {
@@ -466,7 +465,7 @@ impl SyncEngine {
 
         if let Some(folder) = drafts_folder {
             let provider = imap_provider_for(&acc);
-            let mut backend = ImapBackend::new(acc.clone(), provider);
+            let mut backend = crate::backend::make_backend(&acc, provider);
             match backend.connect().await {
                 Ok(()) => {
                     if let Err(e) = backend.append(&folder.path, &raw, &[Flag::Seen]).await {

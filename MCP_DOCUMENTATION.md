@@ -80,7 +80,7 @@ List all configured mail accounts.
 
 **Parameters:** none
 
-**Returns:** JSON array of accounts with `id`, `display_name`, `email`, `imap_host`, `imap_port`, `smtp_host`, `smtp_port`, `auth_type`.
+**Returns:** JSON array of accounts with `id`, `display_name`, `email`, `protocol` (`IMAP` or `POP3`), `imap_host`, `imap_port`, `smtp_host`, `smtp_port`, `auth_type`.
 
 ---
 

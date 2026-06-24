@@ -13,9 +13,9 @@ use imt_core::{
     MessageId, SyncEvent, Uid,
 };
 use imt_net::backend::{EnvelopeFetch, FolderInfo, IdleEvent, MailBackend, UidRange};
-use imt_net::ImapBackend;
 use imt_store::{Db, FolderRepo, MessageRepo};
 
+use crate::backend::make_backend;
 use crate::password::{ensure_fresh_tokens, imap_provider_for};
 use crate::snippet::make_snippet;
 
@@ -136,7 +136,7 @@ async fn run_once(ctx: &AccountTaskCtx) -> std::result::Result<(), SyncErrorReas
         return Err(SyncErrorReason::Other(format!("token refresh: {e}")));
     }
     let provider = imap_provider_for(&ctx.account);
-    let mut backend = ImapBackend::new(ctx.account.clone(), provider);
+    let mut backend = make_backend(&ctx.account, provider);
     backend
         .connect()
         .await
@@ -146,13 +146,13 @@ async fn run_once(ctx: &AccountTaskCtx) -> std::result::Result<(), SyncErrorReas
         account_id: ctx.account.id,
     });
 
-    let folders = sync_folder_list(ctx, &mut backend).await?;
+    let folders = sync_folder_list(ctx, backend.as_mut()).await?;
 
     for f in &folders {
         if ctx.cancel.notified_now() {
             return Err(SyncErrorReason::Cancelled);
         }
-        if let Err(e) = sync_one_folder(ctx, &mut backend, f).await {
+        if let Err(e) = sync_one_folder(ctx, backend.as_mut(), f).await {
             warn!(target: "imt-sync::account_task", "folder sync {}: {}", f.path, e);
             let _ = ctx.tx.send(SyncEvent::Error {
                 account_id: Some(ctx.account.id),
@@ -193,9 +193,9 @@ async fn run_once(ctx: &AccountTaskCtx) -> std::result::Result<(), SyncErrorReas
                 match ev {
                     Ok(IdleEvent::Exists(_)) | Ok(IdleEvent::Expunge(_)) | Ok(IdleEvent::Flags(_)) => {
                         let _ = idle.done().await;
-                        let folders = sync_folder_list(ctx, &mut backend).await?;
+                        let folders = sync_folder_list(ctx, backend.as_mut()).await?;
                         if let Some(folder) = folders.iter().find(|f| f.path == inbox_path) {
-                            if let Err(e) = sync_one_folder(ctx, &mut backend, folder).await {
+                            if let Err(e) = sync_one_folder(ctx, backend.as_mut(), folder).await {
                                 let _ = ctx.tx.send(SyncEvent::Error {
                                     account_id: Some(ctx.account.id),
                                     message: format!("re-sync {}: {}", folder.path, e),
@@ -216,9 +216,9 @@ async fn run_once(ctx: &AccountTaskCtx) -> std::result::Result<(), SyncErrorReas
     }
 }
 
-async fn sync_folder_list<B: MailBackend>(
+async fn sync_folder_list(
     ctx: &AccountTaskCtx,
-    backend: &mut B,
+    backend: &mut dyn MailBackend,
 ) -> std::result::Result<Vec<Folder>, SyncErrorReason> {
     let infos = backend
         .list_folders()
@@ -251,9 +251,9 @@ async fn sync_folder_list<B: MailBackend>(
     Ok(out)
 }
 
-async fn sync_one_folder<B: MailBackend>(
+async fn sync_one_folder(
     ctx: &AccountTaskCtx,
-    backend: &mut B,
+    backend: &mut dyn MailBackend,
     folder: &Folder,
 ) -> std::result::Result<(), SyncErrorReason> {
     let _ = ctx.tx.send(SyncEvent::SyncStarted {

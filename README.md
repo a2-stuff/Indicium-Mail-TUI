@@ -34,7 +34,8 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 
 **Mail**
 - Real RFC 2177 IDLE push - new mail appears instantly without polling
-- IMAP implicit TLS, STARTTLS, and plain; SMTP with the same three modes
+- Choose your receiving protocol per account: IMAP (folders, flags, IDLE push) or POP3 (single inbox, download-oriented)
+- IMAP, POP3, and SMTP each support implicit TLS, STARTTLS, and plain
 - Compose, reply, reply-all, and forward with quoted bodies and correct threading headers (`In-Reply-To`, `References`)
 - Full-text search across all cached messages via SQLite FTS5
 - Move to folder, delete to Trash, flag, mark read/unread
@@ -52,9 +53,10 @@ A keyboard-driven terminal email client built in Rust. Reads and sends mail over
 
 **Account setup**
 - Interactive onboarding modal with provider auto-fill for Gmail, Outlook, Fastmail, Yahoo, and iCloud
+- Incoming protocol selector (IMAP or POP3) right in the onboarding modal, toggled with `←/→` (the host/port labels and the default TLS port follow your choice: 993 for IMAP, 995 for POP3)
 - Password auth or full OAuth2 (PKCE) - switch auth type inside the modal with `←/→`
 - OAuth2 for Gmail, Microsoft 365, Yahoo Mail, and any custom provider; auth URL opens automatically, token exchange and refresh happen in the background
-- "Keep copy on server" per-account toggle (default on). Turn it off for POP3-style behavior: a message is removed from the server once its body is downloaded, while the local copy stays in the client
+- "Keep copy on server" per-account toggle (default on). Turn it off so a message is removed from the server once its body is downloaded, while the local copy stays in the client - this pairs naturally with a POP3 account
 - Multi-account support with an account manager (`m`)
 
 **AI agent integration**
@@ -92,6 +94,12 @@ imt add-account
 IMT_PASSWORD='secret' imt add-account \
   --email you@example.com \
   --imap-host imap.example.com --imap-port 993 --imap-tls implicit \
+  --smtp-host smtp.example.com --smtp-port 465 --smtp-tls implicit
+
+# A POP3 account instead (--protocol pop3; --imap-* flags carry the POP3 host/port/TLS)
+IMT_PASSWORD='secret' imt add-account \
+  --email you@example.com --protocol pop3 \
+  --imap-host pop.example.com --imap-port 995 --imap-tls implicit \
   --smtp-host smtp.example.com --smtp-port 465 --smtp-tls implicit
 
 # Launch the TUI

@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use imt_core::{AccountId, AuthMethod, NewAccountForm, Tls};
+use imt_core::{AccountId, AuthMethod, IncomingProtocol, NewAccountForm, Tls};
 use imt_store::{secrets, AccountRepo, Db};
 use imt_sync::SyncEngine;
 
@@ -41,12 +41,21 @@ pub struct AddAccountArgs {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub username: Option<String>,
+    /// Receiving protocol: "imap" (default) or "pop3".
+    pub protocol: String,
     pub imap_host: Option<String>,
     pub imap_port: u16,
     pub imap_tls: String,
     pub smtp_host: Option<String>,
     pub smtp_port: u16,
     pub smtp_tls: String,
+}
+
+fn parse_protocol(s: &str) -> IncomingProtocol {
+    match s.to_lowercase().as_str() {
+        "pop3" | "pop" => IncomingProtocol::Pop3,
+        _ => IncomingProtocol::Imap,
+    }
 }
 
 fn parse_tls(s: &str) -> Tls {
@@ -77,15 +86,25 @@ pub async fn add_account(db_path: &Path, args: AddAccountArgs) -> Result<()> {
         _ => rpassword::prompt_password("Password: ")?,
     };
 
+    let protocol = parse_protocol(&args.protocol);
+    let proto_label = protocol.label();
     let (default_imap, default_imap_port, default_smtp, default_smtp_port) = preset_for_email(&email);
+    // POP3's implicit-TLS port is 995, not IMAP's 993.
+    let default_imap_port = match protocol {
+        IncomingProtocol::Pop3 => protocol.default_tls_port(),
+        IncomingProtocol::Imap => default_imap_port,
+    };
     let imap_host = match args.imap_host {
         Some(v) => v,
-        None => prompt_default("IMAP host", &default_imap)?,
+        None => prompt_default(&format!("{proto_label} host"), &default_imap)?,
     };
-    let imap_port = if args.imap_port != 0 { args.imap_port } else {
-        prompt_default("IMAP port", &default_imap_port.to_string())?.parse().context("invalid IMAP port")?
+    // Treat the IMAP clap default (993) as "unset" for POP3 so the 995 default applies.
+    let imap_port = if args.imap_port != 0 && !(protocol == IncomingProtocol::Pop3 && args.imap_port == 993) {
+        args.imap_port
+    } else {
+        prompt_default(&format!("{proto_label} port"), &default_imap_port.to_string())?.parse().context("invalid incoming port")?
     };
-    let imap_tls = if !args.imap_tls.is_empty() { parse_tls(&args.imap_tls) } else { prompt_tls("IMAP TLS (implicit/starttls/none)")? };
+    let imap_tls = if !args.imap_tls.is_empty() { parse_tls(&args.imap_tls) } else { prompt_tls(&format!("{proto_label} TLS (implicit/starttls/none)"))? };
     let smtp_host = match args.smtp_host {
         Some(v) => v,
         None => prompt_default("SMTP host", &default_smtp)?,
@@ -98,6 +117,7 @@ pub async fn add_account(db_path: &Path, args: AddAccountArgs) -> Result<()> {
     let form = NewAccountForm {
         display_name,
         email,
+        incoming_protocol: protocol,
         imap_host,
         imap_port,
         imap_tls,
