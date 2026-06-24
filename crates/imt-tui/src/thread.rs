@@ -91,19 +91,74 @@ pub fn collect_thread(all: &[Message], target_id: MessageId) -> Vec<Message> {
         .map(|m| (*m).clone())
         .collect();
 
-    // Fallback: if the headers didn't link anything, group by normalized subject.
-    if result.len() <= 1 {
-        let subj = normalize_subject(&target.headers.subject);
-        if !subj.is_empty() {
-            seen.clear();
-            result = pool
-                .iter()
-                .filter(|m| normalize_subject(&m.headers.subject) == subj && seen.insert(m.id))
-                .map(|m| (*m).clone())
-                .collect();
-        }
-    }
+    // NOTE: grouping is by RFC 822 references only (Message-ID / In-Reply-To /
+    // References). We deliberately do NOT fall back to matching on the subject
+    // line - unrelated messages that merely share a subject (even the same
+    // subject sent from a different account) must not be lumped into one thread.
 
     result.sort_by_key(|m| m.headers.date);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use imt_core::{AccountId, FolderId, MessageHeaders, Uid};
+
+    fn headers(subject: &str, msg_id: Option<&str>, in_reply_to: Option<&str>) -> MessageHeaders {
+        MessageHeaders {
+            rfc_message_id: msg_id.map(str::to_string),
+            in_reply_to: in_reply_to.map(str::to_string),
+            references: Vec::new(),
+            from: Vec::new(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            subject: subject.to_string(),
+            date: Utc::now(),
+        }
+    }
+
+    fn msg(account: AccountId, headers: MessageHeaders) -> Message {
+        Message {
+            id: MessageId::new(),
+            account_id: account,
+            folder_id: FolderId::new(),
+            thread_id: None,
+            uid: Uid(1),
+            headers,
+            flags: Vec::new(),
+            size: 0,
+            body: None,
+            has_attachments: false,
+            snippet: String::new(),
+            internal_date: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn same_subject_unrelated_messages_do_not_group() {
+        let acc = AccountId::new();
+        // Two messages with the identical subject but NO shared references.
+        let a = msg(acc, headers("Tester", Some("<a@x>"), None));
+        let b = msg(acc, headers("Tester", Some("<b@y>"), None));
+        let id = a.id;
+        let all = vec![a, b];
+        let thread = collect_thread(&all, id);
+        assert_eq!(thread.len(), 1, "subject must not group unrelated messages");
+    }
+
+    #[test]
+    fn genuine_reply_groups_via_references() {
+        let acc = AccountId::new();
+        let original = msg(acc, headers("Tester", Some("<orig@x>"), None));
+        // Reply points at the original via In-Reply-To.
+        let reply = msg(acc, headers("Re: Tester", Some("<reply@x>"), Some("<orig@x>")));
+        let id = original.id;
+        let all = vec![original, reply];
+        let thread = collect_thread(&all, id);
+        assert_eq!(thread.len(), 2, "genuine reply should join the thread");
+    }
 }

@@ -35,6 +35,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         width: chunks.sidebar.width + chunks.list.width + chunks.reader.width,
         height: chunks.sidebar.height,
     };
+    app.ui_menu = chunks.menu_bar;
+    app.ui_sidebar = chunks.sidebar;
+    app.ui_list = chunks.list;
+    app.ui_reader = chunks.reader;
     menubar::render_menu_bar(f, chunks.menu_bar, app);
     sidebar::render(f, chunks.sidebar, app);
     list::render(f, chunks.list, app);

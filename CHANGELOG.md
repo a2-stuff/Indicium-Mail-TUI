@@ -13,12 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP `send` and `reply` accept an `attachments` parameter.** Any MCP agent can attach files it created by passing a list of local file paths (or `{path, filename}` objects); the MIME type is inferred from the extension and nonexistent paths return a clear error.
 - **View attachments from the conversation thread view.** In the thread (`t`) modal, messages with attachments are marked 📎 and the selected message lists its attachment names above the body. Press `a` (or `Enter`) to open the attachment viewer for the selected thread message; closing it returns to the conversation view.
 - **Attachment indicator in the message list (all folders, including Sent).** Messages that carry attachments show a 📎 before the subject, so attachment-bearing mail - including emails you sent - is visible at a glance without opening each one. Attachments are detected from the server's **BODYSTRUCTURE** (the exact MIME tree, no attachment bytes downloaded), with a Content-Type header heuristic as a fallback. The flag is persisted (`has_attachments`, migration `0004`) and corrected to the exact value once a body is downloaded. Each folder does a **one-time full rescan** on its next sync so pre-existing messages get the flag (tracked in `folder_attachment_scan`, migration `0005`), and a SQL backfill flags any message whose body was already downloaded.
+- **Full mouse interaction across the menu bar and the three panes.**
+  - **Menu bar:** click a top menu to open its dropdown (Account) or run it directly (Settings / Info / Help / Quit); click an item in an open dropdown to run it; click the same menu again or click away to close it.
+  - **Sidebar:** click an account header to expand/collapse it; click a folder to switch to it (loads its messages and focuses the list).
+  - **Message list:** click an email to select it and open it in the reading pane.
+  - **Reading pane:** click to focus it.
+  - **Scroll wheel** scrolls whichever pane is under the cursor (reading pane scrolls lines, message list moves the selection, sidebar moves through folders).
 
 ### Changed
 - The AI reply instruction dialog moved from `Ctrl-Shift-G` to `Ctrl-T` so it works on terminals without the enhanced keyboard protocol (`Ctrl-Shift-G` still works where supported).
 
 ### Fixed
 - **AI generation in a new compose no longer pulls in the background-selected message as context.** When composing a brand-new email (not a reply), `Ctrl-G` / `Ctrl-T` now generate a fresh email from your notes and instruction only - the message highlighted in the list/reader behind the compose window is ignored. Replies and forwards still use the email they are responding to. The prompt is framed as a new email (no "email being replied to" section), and an instruction-only `Ctrl-T` is now accepted in a new compose.
+- **Conversations no longer group unrelated messages that share a subject line.** Threading now relies only on the RFC 822 references (`Message-ID` / `In-Reply-To` / `References`); the normalized-subject fallback was removed. Previously a brand-new email that merely reused a subject (even one sent from a different account) was lumped into an existing thread and inflated its message count.
 
 ## [0.2.0] - 2026-06-23
 

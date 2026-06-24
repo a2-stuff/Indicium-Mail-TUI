@@ -448,6 +448,11 @@ pub struct App {
     pub ui_frame: ratatui::layout::Rect,
     /// Last three-pane body rect (set during draw).
     pub ui_main: ratatui::layout::Rect,
+    /// Last menu-bar / pane rects (set during draw, used for mouse hit-testing).
+    pub ui_menu: ratatui::layout::Rect,
+    pub ui_sidebar: ratatui::layout::Rect,
+    pub ui_list: ratatui::layout::Rect,
+    pub ui_reader: ratatui::layout::Rect,
     /// Active pane-divider drag (1 = sidebar|list, 2 = list|reader).
     pub pane_drag: Option<u8>,
     /// Thread view state, when open.
@@ -455,6 +460,14 @@ pub struct App {
     /// Number of messages in the current message's thread (>=1); drives the
     /// reader's thread hint. 0 = not computed / no message.
     pub current_thread_count: usize,
+}
+
+/// What a sidebar row points at, for mouse hit-testing.
+enum SidebarTarget {
+    /// Account header at this index.
+    Account(usize),
+    /// Folder (account index, folder index).
+    Folder(usize, usize),
 }
 
 /// Thread (conversation) view modal state.
@@ -740,6 +753,10 @@ impl App {
             list_frac: 0.35,
             ui_frame: ratatui::layout::Rect::default(),
             ui_main: ratatui::layout::Rect::default(),
+            ui_menu: ratatui::layout::Rect::default(),
+            ui_sidebar: ratatui::layout::Rect::default(),
+            ui_list: ratatui::layout::Rect::default(),
+            ui_reader: ratatui::layout::Rect::default(),
             pane_drag: None,
             thread_state: None,
             current_thread_count: 0,
@@ -1388,8 +1405,21 @@ impl App {
             return;
         }
         match m.kind {
+            MouseEventKind::ScrollUp => self.scroll_at(m.column, m.row, -3),
+            MouseEventKind::ScrollDown => self.scroll_at(m.column, m.row, 3),
             MouseEventKind::Down(MouseButton::Left) => {
-                self.pane_drag = self.divider_hit(m.column, m.row);
+                // Menu bar / open dropdown take priority (works from any non-modal
+                // mode so the bar is clickable even while reading).
+                if self.mouse_menu_down(m.column, m.row) {
+                    return;
+                }
+                // A click on a pane boundary starts a divider drag; otherwise it
+                // selects whatever was clicked in the panes.
+                if let Some(d) = self.divider_hit(m.column, m.row) {
+                    self.pane_drag = Some(d);
+                } else if self.mode == Mode::Normal {
+                    self.mouse_click(m.column, m.row);
+                }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 if let Some(d) = self.pane_drag {
@@ -1403,6 +1433,204 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// True if the point is inside `r`.
+    fn rect_contains(r: ratatui::layout::Rect, col: u16, row: u16) -> bool {
+        col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+    }
+
+    /// Handle a left-press on the menu bar or an open dropdown. Returns true if
+    /// the event was consumed (a menu was opened, an item run, or a menu closed).
+    fn mouse_menu_down(&mut self, col: u16, row: u16) -> bool {
+        use crate::menu::MENUS;
+        // If a dropdown is open, a click inside it runs the item; a click
+        // anywhere else (except switching menus, handled below) closes it.
+        if self.mode == Mode::Menu {
+            if let Some(ms) = self.menu_state {
+                if ms.open {
+                    if let Some(area) = crate::ui::menubar::dropdown_rect(self.ui_menu, self.ui_frame, ms.col) {
+                        // Inner item rows sit one cell inside the bordered box.
+                        let inner_top = area.y + 1;
+                        let inner_bot = area.y + area.height.saturating_sub(1);
+                        if col > area.x && col < area.x + area.width.saturating_sub(1)
+                            && row >= inner_top && row < inner_bot
+                        {
+                            let idx = (row - inner_top) as usize;
+                            if let Some(item) = MENUS.get(ms.col).and_then(|mn| mn.items.get(idx)) {
+                                let action = item.action;
+                                self.menu_state = None;
+                                self.mode = Mode::Normal;
+                                self.dispatch(action);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // A click on the menu-bar row itself.
+        if row == self.ui_menu.y {
+            if let Some(idx) = self.menu_hit(col) {
+                let menu = &MENUS[idx];
+                if menu.items.is_empty() {
+                    if let Some(a) = menu.action {
+                        self.menu_state = None;
+                        self.mode = Mode::Normal;
+                        self.dispatch(a);
+                    }
+                } else {
+                    // Toggle this menu's dropdown.
+                    let already = self.mode == Mode::Menu
+                        && self.menu_state.map(|m| m.col == idx && m.open).unwrap_or(false);
+                    if already {
+                        self.menu_state = None;
+                        self.mode = Mode::Normal;
+                    } else {
+                        self.menu_state = Some(crate::menu::MenuState { col: idx, open: true, item: 0 });
+                        self.mode = Mode::Menu;
+                    }
+                }
+                return true;
+            }
+            // Clicked an empty part of the bar - close any open menu.
+            if self.mode == Mode::Menu {
+                self.menu_state = None;
+                self.mode = Mode::Normal;
+            }
+            return true;
+        }
+
+        // Click elsewhere while a menu is open closes it (click-away).
+        if self.mode == Mode::Menu {
+            self.menu_state = None;
+            self.mode = Mode::Normal;
+            return true;
+        }
+        false
+    }
+
+    /// Which top menu (if any) sits under column `col` on the menu bar.
+    fn menu_hit(&self, col: u16) -> Option<usize> {
+        use crate::menu::MENUS;
+        let mut x = self.ui_menu.x;
+        for (i, m) in MENUS.iter().enumerate() {
+            let caret = if m.items.is_empty() { 0 } else { 2 };
+            let w = m.label.chars().count() as u16 + 2 + caret;
+            if col >= x && col < x + w {
+                return Some(i);
+            }
+            x += w;
+        }
+        None
+    }
+
+    /// Handle a left-click in the panes (sidebar / list / reader).
+    fn mouse_click(&mut self, col: u16, row: u16) {
+        if Self::rect_contains(self.ui_sidebar, col, row) {
+            match self.sidebar_target_at(row) {
+                Some(SidebarTarget::Account(ai)) => {
+                    self.sidebar_account_idx = ai;
+                    if let Some(av) = self.accounts.get_mut(ai) {
+                        av.expanded = !av.expanded;
+                    }
+                    self.focus = Focus::Sidebar;
+                }
+                Some(SidebarTarget::Folder(ai, fi)) => {
+                    self.sidebar_account_idx = ai;
+                    self.sidebar_folder_idx = fi;
+                    self.message_idx = 0;
+                    self.focus = Focus::MessageList;
+                    self.refresh_messages();
+                }
+                None => {}
+            }
+        } else if Self::rect_contains(self.ui_list, col, row) {
+            if let Some(i) = self.message_at_row(row) {
+                self.message_idx = i;
+                self.focus = Focus::Reader;
+                self.refresh_body();
+            }
+        } else if Self::rect_contains(self.ui_reader, col, row) {
+            self.focus = Focus::Reader;
+        }
+    }
+
+    /// Scroll the pane under the cursor by `delta` (lines/messages, sign = dir).
+    fn scroll_at(&mut self, col: u16, row: u16, delta: i32) {
+        if self.mode != Mode::Normal {
+            return;
+        }
+        if Self::rect_contains(self.ui_reader, col, row) {
+            if delta < 0 {
+                self.reader_scroll = self.reader_scroll.saturating_sub((-delta) as u16);
+            } else {
+                self.reader_scroll = self.reader_scroll.saturating_add(delta as u16);
+            }
+        } else if Self::rect_contains(self.ui_list, col, row) {
+            if self.messages.is_empty() {
+                return;
+            }
+            let new = (self.message_idx as i32 + delta)
+                .clamp(0, self.messages.len().saturating_sub(1) as i32) as usize;
+            if new != self.message_idx {
+                self.message_idx = new;
+                self.refresh_body();
+            }
+        } else if Self::rect_contains(self.ui_sidebar, col, row) {
+            for _ in 0..delta.unsigned_abs() {
+                if delta > 0 {
+                    self.sidebar_down();
+                } else {
+                    self.sidebar_up();
+                }
+            }
+        }
+    }
+
+    /// Map a screen row in the sidebar to an account header or a folder,
+    /// mirroring the sidebar renderer's line order.
+    fn sidebar_target_at(&self, row: u16) -> Option<SidebarTarget> {
+        let inner_top = self.ui_sidebar.y + 1; // inside the top border
+        if row < inner_top {
+            return None;
+        }
+        let mut r = inner_top;
+        for (ai, av) in self.accounts.iter().enumerate() {
+            if row == r {
+                return Some(SidebarTarget::Account(ai));
+            }
+            r += 1;
+            if av.expanded {
+                for fi in 0..av.folders.len() {
+                    if row == r {
+                        return Some(SidebarTarget::Folder(ai, fi));
+                    }
+                    r += 1;
+                }
+            }
+        }
+        None
+    }
+
+    /// Map a screen row in the message list to a message index, accounting for
+    /// the optional 2-line snippet rows.
+    fn message_at_row(&self, row: u16) -> Option<usize> {
+        let inner_top = self.ui_list.y + 1; // inside the top border
+        if row < inner_top {
+            return None;
+        }
+        let show_snippet = self.settings.show_snippet;
+        let mut r = inner_top;
+        for (i, m) in self.messages.iter().enumerate() {
+            let h = if show_snippet && !m.snippet.is_empty() { 2 } else { 1 };
+            if row >= r && row < r + h {
+                return Some(i);
+            }
+            r += h;
+        }
+        None
     }
 
     /// Which pane divider (1 = sidebar|list, 2 = list|reader) is at this cell.
@@ -2588,5 +2816,59 @@ impl App {
             .find(|a| a.account.id == account)
             .map(|a| a.folders.iter().map(|f| f.id).collect())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod mouse_tests {
+    use super::*;
+    use crate::data::InMemoryDataSource;
+    use ratatui::layout::Rect;
+    use std::sync::Arc;
+
+    fn app() -> App {
+        App::new(Arc::new(InMemoryDataSource::sample()))
+    }
+
+    #[test]
+    fn menu_hit_maps_columns_to_menus() {
+        let mut a = app();
+        a.ui_menu = Rect { x: 0, y: 0, width: 60, height: 1 };
+        // "Account" (with caret) spans cols 0..11.
+        assert_eq!(a.menu_hit(0), Some(0));
+        assert_eq!(a.menu_hit(10), Some(0));
+        // "Settings" begins right after.
+        assert_eq!(a.menu_hit(11), Some(1));
+        // Far past the last label hits nothing.
+        assert_eq!(a.menu_hit(200), None);
+    }
+
+    #[test]
+    fn sidebar_rows_map_to_account_then_folders() {
+        let mut a = app();
+        a.ui_sidebar = Rect { x: 0, y: 0, width: 24, height: 20 };
+        // Account 0 is expanded by default; row y+1 is its header.
+        assert!(matches!(a.sidebar_target_at(1), Some(SidebarTarget::Account(0))));
+        assert!(matches!(a.sidebar_target_at(2), Some(SidebarTarget::Folder(0, 0))));
+        assert!(matches!(a.sidebar_target_at(6), Some(SidebarTarget::Folder(0, 4))));
+        // After account 0's five folders comes account 1's header.
+        assert!(matches!(a.sidebar_target_at(7), Some(SidebarTarget::Account(1))));
+        // Above the inner area there is nothing.
+        assert!(a.sidebar_target_at(0).is_none());
+    }
+
+    #[test]
+    fn list_rows_map_to_messages() {
+        let mut a = app();
+        a.settings.show_snippet = false;
+        a.ui_list = Rect { x: 0, y: 0, width: 40, height: 20 };
+        if a.messages.is_empty() {
+            return; // sample seed always has inbox messages, but be defensive
+        }
+        // First inner row (y+1) is message 0.
+        assert_eq!(a.message_at_row(1), Some(0));
+        assert_eq!(a.message_at_row(2), Some(1));
+        // The top border row is not a message.
+        assert_eq!(a.message_at_row(0), None);
     }
 }

@@ -38,6 +38,40 @@ pub fn render_menu_bar(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(p, area);
 }
 
+/// X offset of the menu-bar segment for menu `col` (start column).
+pub fn segment_x(menu_bar: Rect, col: usize) -> u16 {
+    let mut x = menu_bar.x;
+    for m in MENUS.iter().take(col) {
+        let caret = if m.items.is_empty() { 0 } else { 2 };
+        x += seg_width(m.label) + caret;
+    }
+    x
+}
+
+/// Geometry of the dropdown box for menu `col`, clamped to `full`. Shared by the
+/// renderer and mouse hit-testing so clicks land on the right item. None if the
+/// menu has no items or there is no room.
+pub fn dropdown_rect(menu_bar: Rect, full: Rect, col: usize) -> Option<Rect> {
+    let menu = MENUS.get(col).filter(|m| !m.items.is_empty())?;
+    let x = segment_x(menu_bar, col);
+    let item_w = menu
+        .items
+        .iter()
+        .map(|it| it.label.chars().count() + it.key_hint.chars().count() + 5)
+        .max()
+        .unwrap_or(12) as u16;
+    // Clamp the dropdown to the frame so it never indexes outside the buffer
+    // (important on very small terminals).
+    let width = item_w.max(16).min(full.width);
+    let height = (menu.items.len() as u16 + 2).min(full.height.saturating_sub(menu_bar.y + 1));
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let y = menu_bar.y + 1;
+    let x = x.min(full.right().saturating_sub(width));
+    Some(Rect { x, y, width, height })
+}
+
 /// Render the dropdown for the currently-open top menu, if any.
 pub fn render_dropdown(f: &mut Frame, menu_bar: Rect, app: &App) {
     if app.mode != Mode::Menu {
@@ -52,31 +86,11 @@ pub fn render_dropdown(f: &mut Frame, menu_bar: Rect, app: &App) {
         _ => return,
     };
 
-    // X offset = sum of preceding label segment widths.
-    let mut x = menu_bar.x;
-    for m in MENUS.iter().take(ms.col) {
-        let caret = if m.items.is_empty() { 0 } else { 2 };
-        x += seg_width(m.label) + caret;
-    }
-
-    let item_w = menu
-        .items
-        .iter()
-        .map(|it| it.label.chars().count() + it.key_hint.chars().count() + 5)
-        .max()
-        .unwrap_or(12) as u16;
-
-    // Clamp the dropdown to the frame so it never indexes outside the buffer
-    // (important on very small terminals).
     let full = f.area();
-    let width = item_w.max(16).min(full.width);
-    let height = (menu.items.len() as u16 + 2).min(full.height.saturating_sub(menu_bar.y + 1));
-    if width == 0 || height == 0 {
-        return;
-    }
-    let y = menu_bar.y + 1;
-    let x = x.min(full.right().saturating_sub(width));
-    let area = Rect { x, y, width, height };
+    let area = match dropdown_rect(menu_bar, full, ms.col) {
+        Some(a) => a,
+        None => return,
+    };
 
     f.render_widget(Clear, area);
     let block = Block::default()
@@ -87,12 +101,13 @@ pub fn render_dropdown(f: &mut Frame, menu_bar: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    let item_w = inner.width as usize;
     let items: Vec<ListItem> = menu
         .items
         .iter()
         .map(|it| {
             ListItem::new(Line::from(vec![
-                Span::styled(format!(" {:<width$}", it.label, width = (item_w as usize).saturating_sub(it.key_hint.chars().count() + 4)), theme::normal()),
+                Span::styled(format!(" {:<width$}", it.label, width = item_w.saturating_sub(it.key_hint.chars().count() + 3)), theme::normal()),
                 Span::styled(format!("{} ", it.key_hint), theme::muted()),
             ]))
         })
